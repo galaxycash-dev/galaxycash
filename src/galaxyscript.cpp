@@ -15,33 +15,10 @@
 
 #define BIT(x) (1 << x)
 
-std::string VMRandName()
+std::string RandName()
 {
     char name[17];
     memset(name, 0, sizeof(name));
     GetRandBytes((unsigned char*)name, sizeof(name) - 1);
     return name;
-}
-
-CJSReference* CJSObject::NewReference(const std::string& name)
-{
-    CJSReference* ref = this->AddOwnProperty(name, CJSPropertyDescriptor(CJSPropertyDescriptor::Value, new CJSReference()))->descriptor.value->AsReference();
-    return ref;
-}
-
-CJSValue* CJSReference::GetValue()
-{
-    if (value) return value;
-    if (root && !name.empty()) {
-        CJSValue* tree = root;
-        while (!value && tree) {
-            if (tree->IsObject()) {
-                CJSObject* scope = tree->AsObject();
-                value = scope->GetOwnPropertyValue(name);
-            }
-            tree = tree->root;
-        }
-        return value ? value->Grab() : new CJSNull();
-    }
-    return new CJSNull();
 }

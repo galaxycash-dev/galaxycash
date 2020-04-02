@@ -602,9 +602,9 @@ static UniValue runscript(const JSONRPCRequest& request)
         );
 
     std::string path = request.params[0].get_str();
-    if (!CCCompileFile(path)) {
+    /*if (!CCCompileFile(path)) {
         return std::string("Failed to compile file ") + path;
-    }
+    }*/
     
     return NullUniValue;
 }
