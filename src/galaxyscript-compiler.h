@@ -231,6 +231,193 @@ public:
     void SkipToken();
 };
 
+class CScriptAssembler {
+public:
+    CByteArray code;
+
+    CScriptAssembler() {}
+    CScriptAssembler(const CScriptAssembler &as) : code(as.code) {}
+    CScriptAssembler(const CByteArray &code) : code(code) {}
+
+    CScriptAssembler &Opcode(const uint8_t op) { code.push_back(op); return *this; }
+
+    CScriptAssembler &Emit(const int8_t value) {
+        code.push_back(*(uint8_t*) &value);
+        return *this;
+    }
+    CScriptAssembler &Emit(const uint8_t value) {
+        code.push_back(value);
+        return *this;
+    }
+
+    CScriptAssembler &Emit(const int16_t &value) {
+        const int16_t v = htole16(value);
+        code.push_back(*(((uint8_t*) &v) + 0));
+        code.push_back(*(((uint8_t*) &v) + 1));
+        return *this;
+    }
+    CScriptAssembler &Emit(const uint16_t value) {
+        const uint16_t v = htole16(value);
+        code.push_back(*(((uint8_t*) &v) + 0));
+        code.push_back(*(((uint8_t*) &v) + 1));
+        return *this;
+    }
+
+    CScriptAssembler &Emit(const int32_t &value) {
+        const int32_t v = htole32(value);
+        code.push_back(*(((uint8_t*) &v) + 0));
+        code.push_back(*(((uint8_t*) &v) + 1));
+        code.push_back(*(((uint8_t*) &v) + 2));
+        code.push_back(*(((uint8_t*) &v) + 3));
+        return *this;
+    }
+    CScriptAssembler &Emit(const uint32_t value) {
+        const uint32_t v = htole32(value);
+        code.push_back(*(((uint8_t*) &v) + 0));
+        code.push_back(*(((uint8_t*) &v) + 1));
+        code.push_back(*(((uint8_t*) &v) + 2));
+        code.push_back(*(((uint8_t*) &v) + 3));
+        return *this;
+    }
+
+    CScriptAssembler &Emit(const int64_t &value) {
+        const int64_t v = htole64(value);
+        code.push_back(*(((uint8_t*) &v) + 0));
+        code.push_back(*(((uint8_t*) &v) + 1));
+        code.push_back(*(((uint8_t*) &v) + 2));
+        code.push_back(*(((uint8_t*) &v) + 3));
+        code.push_back(*(((uint8_t*) &v) + 4));
+        code.push_back(*(((uint8_t*) &v) + 5));
+        code.push_back(*(((uint8_t*) &v) + 6));
+        code.push_back(*(((uint8_t*) &v) + 7));
+        return *this;
+    }
+    CScriptAssembler &Emit(const uint64_t value) {
+        const uint64_t v = htole64(value);
+        code.push_back(*(((uint8_t*) &v) + 0));
+        code.push_back(*(((uint8_t*) &v) + 1));
+        code.push_back(*(((uint8_t*) &v) + 2));
+        code.push_back(*(((uint8_t*) &v) + 3));
+        code.push_back(*(((uint8_t*) &v) + 4));
+        code.push_back(*(((uint8_t*) &v) + 5));
+        code.push_back(*(((uint8_t*) &v) + 6));
+        code.push_back(*(((uint8_t*) &v) + 7));
+        return *this;
+    }
+    CScriptAssembler &Emit(const std::string &value) {
+        Emit((uint32_t) value.length());
+        for (size_t i = 0; i < value.length(); i++) Emit(value[i]);
+        return *this;
+    }
+    CScriptAssembler &Emit(const CByteArray &value) {
+        Emit((uint32_t) value.size());
+        for (size_t i = 0; i < value.size(); i++) Emit(value[i]);
+        return *this;
+    }
+    CScriptAssembler &Emit(const bool value) {
+        return Emit((uint8_t) (value ? 1 : 0));
+    }
+    CScriptAssembler &Emit(const uint160 &x) {
+        Emit(x.size());
+        for (size_t i = 0; i < x.size(); i++) Emit(x.begin()[i]);
+        return *this;
+    }
+    CScriptAssembler &Emit(const uint256 &x) {
+        Emit(x.size());
+        for (size_t i = 0; i < x.size(); i++) Emit(x.begin()[i]);
+        return *this;
+    }
+    CScriptAssembler &Emit(const uint512 &x) {
+        Emit(x.size());
+        for (size_t i = 0; i < x.size(); i++) Emit(x.begin()[i]);
+        return *this;
+    }
+
+    CScriptAssembler &Nop() { return Opcode(CScriptOpcode::NOP); }
+    CScriptAssembler &Pop() { return Opcode(CScriptOpcode::POP); }
+    CScriptAssembler &Dup() { return Opcode(CScriptOpcode::DUP); }
+    CScriptAssembler &Ret() { return Opcode(CScriptOpcode::RET); }
+    CScriptAssembler &End() { return Opcode(CScriptOpcode::END); }
+
+    CScriptAssembler &Declare(const std::string &name, const uint8_t type, const uint8_t enumerable) { 
+        Opcode(CScriptOpcode::DECLARE); 
+        Emit(name); 
+        Emit(type); 
+        return Emit(enumerable); 
+    }
+                
+};
+
+class CScriptNode {
+public:
+    virtual ~CScriptNode() {}
+    virtual std::string Type() const { return "None"; }
+
+    virtual bool Codegen(CScriptAssembler &as) { 
+        as.Nop();
+        return false;
+    }
+};
+
+class CScriptBlockNode : public CScriptNode {
+public: 
+    std::vector<CScriptNode*> nodes;
+
+    CScriptBlockNode() {}
+    CScriptBlockNode(const std::vector<CScriptNode*> &nodes) : nodes(nodes) {}
+    virtual ~CScriptBlockNode() {
+        for (size_t i = 0; i < nodes.size(); i++) delete nodes[i];
+    }
+    virtual std::string Type() const { return "Block"; }
+
+    virtual bool Codegen(CScriptAssembler &as) { 
+        as.Block();
+        for (size_t i = 0; i < nodes.size(); i++) {
+            if (!nodes[i]->Codegen(as)) return false;
+        }
+        as.End();
+        return true;
+    }
+};
+
+class CScriptDeclareNode : public CScriptNode {
+public:
+    uint8_t type, enumerable;
+    std::string name;
+
+    CScriptDeclareNode() {}
+    CScriptDeclareNode(const std::string &name, const uint8_t type, const uint8_t enumerable) : name(name), type(type), enumerable(enumerable) {}
+
+    virtual std::string Type() const { return "Declare"; }
+
+    virtual bool Codegen(CScriptAssembler &as) { 
+        if (!as.Declare(name, type, enumerable)) return false;
+        return true;
+    }
+};
+
+class CScriptBinaryNode : public CScriptNode {
+public:
+    CScriptNode *left, *right;
+
+    CScriptBinaryNode(CScriptNode *left, CScriptNode *right) : left(left), right(right) {}
+    virtual ~CScriptBinaryNode() {
+        if (left) delete left;
+        if (right) delete right;
+    }
+
+    virtual CScriptNode *Left() { return left; }
+    virtual CScriptNode *Right() { return right; }
+
+    virtual std::string Type() const { return "Binary"; }
+
+    
+    virtual bool Codegen(CScriptAssembler &as) { 
+        if (!left->Codegen(as)) return false;
+        if (!right->Codegen(as)) return false;
+        return true;
+    }
+};
 
 class CScriptCompiler {
 
