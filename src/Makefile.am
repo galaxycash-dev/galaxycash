@@ -422,16 +422,18 @@ endif
 LIBGALAXYCASH = libgalaxycash.a
 EXTRA_LIBRARIES += $(LIBGALAXYCASH)
 
+
 LIBGALAXYCASH_CPPFLAGS = $(BITCOIN_INCLUDES) -I$(srcdir)
+
 
 
 libgalaxycash_a_CPPFLAGS = $(AM_CPPFLAGS) $(LIBGALAXYCASH_CPPFLAGS)
 libgalaxycash_a_CXXFLAGS = $(AM_CXXFLAGS) "-std=c++17" $(PIE_FLAGS)
 
+
 libgalaxycash_a_SOURCES =
 libgalaxycash_a_SOURCES += \
   galaxycash.cpp \
-  galaxyscript-compiler.cpp \
   galaxyscript.cpp \
   $(BITCOIN_CORE_H)
 

@@ -71,6 +71,8 @@
 #include <zmq/zmqnotificationinterface.h>
 #endif
 
+#include <galaxyscript.h>
+
 static const bool DEFAULT_PROXYRANDOMIZE = true;
 static const bool DEFAULT_REST_ENABLE = false;
 static const bool DEFAULT_STOPAFTERBLOCKIMPORT = false;
@@ -191,6 +193,7 @@ void Shutdown()
     RenameThread("galaxycash-shutoff");
     mempool.AddTransactionsUpdated(1);
 
+    GSShutdown();
 
     StopHTTPRPC();
     StopREST();
@@ -1683,6 +1686,7 @@ bool AppInitMain()
 
     sporkManager.Init();
     threadGroup.create_thread(boost::bind(&ThreadSporks));
+
     
-    return true;
+    return GSInit();
 }

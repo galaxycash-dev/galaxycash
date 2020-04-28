@@ -35,7 +35,7 @@
 
 #include "galaxycash.h"
 #include "galaxyscript.h"
-#include "galaxyscript-compiler.h"
+
 
 #ifdef ENABLE_WALLET
 class DescribeAddressVisitor : public boost::static_visitor<UniValue>
@@ -598,14 +598,23 @@ static UniValue runscript(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() < 1)
         throw JSONRPCError(RPC_METHOD_NOT_FOUND,
-            "run \"file\"\n"
+            "run \"filepath\"\n"
         );
 
-    std::string path = request.params[0].get_str();
-    /*if (!CCCompileFile(path)) {
-        return std::string("Failed to compile file ") + path;
-    }*/
-    
+
+    fs::path path(request.params[0].get_str());
+
+    std::string source;
+    FILE *fp = fsbridge::fopen(path, "r");
+    if (fp) {
+        while (int c = fgetc(fp)) {
+            source += (char) c;
+        }
+        fclose(fp);
+    }
+    if (!source.empty()) {
+        return GSExec(source) ? "ok" : "fail";
+    }
     return NullUniValue;
 }
 
