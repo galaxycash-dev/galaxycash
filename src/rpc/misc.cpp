@@ -602,18 +602,24 @@ static UniValue runscript(const JSONRPCRequest& request)
         );
 
 
-    fs::path path(request.params[0].get_str());
+    fs::path p(request.params[0].get_str());
 
     std::string source;
-    FILE *fp = fsbridge::fopen(path, "r");
+    FILE *fp = fsbridge::fopen(p, "r");
     if (fp) {
-        while (int c = fgetc(fp)) {
-            source += (char) c;
-        }
+        fseek(fp, 0, SEEK_END);
+        size_t l = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        source.resize(l + 1);
+        fread(&source[0], 1, l, fp);
+        source[l] = '\0';
         fclose(fp);
     }
     if (!source.empty()) {
         return GSExec(source) ? "ok" : "fail";
+    } else {
+        if (!fs::exists(p)) return "file not found";
+        return "empty file";
     }
     return NullUniValue;
 }
