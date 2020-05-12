@@ -736,9 +736,6 @@ DUK_EXTERNAL_DECL duk_idx_t duk_push_c_lightfunc(duk_context *ctx, duk_c_functio
 DUK_EXTERNAL_DECL duk_idx_t duk_push_thread_raw(duk_context *ctx, duk_uint_t flags);
 DUK_EXTERNAL_DECL duk_idx_t duk_push_proxy(duk_context *ctx, duk_uint_t proxy_flags);
 
-DUK_EXTERNAL_DECL const char *duk_push_string_file_raw(duk_context *ctx, const char *path, duk_uint_t flags);
-#define duk_push_string_file(ctx,path) \
-	duk_push_string_file_raw((ctx), (path), 0)
 
 #define duk_push_thread(ctx) \
 	duk_push_thread_raw((ctx), 0 /*flags*/)
@@ -1313,36 +1310,6 @@ DUK_EXTERNAL_DECL duk_int_t duk_compile_raw(duk_context *ctx, const char *src_bu
 #define duk_pcompile_lstring_filename(ctx,flags,buf,len)  \
 	(duk_compile_raw((ctx), buf, len, 1 /*args*/ | (flags) | DUK_COMPILE_SAFE | DUK_COMPILE_NOSOURCE))
 
-/* file */
-#define duk_eval_file(ctx,path)  \
-	((void) duk_push_string_file_raw((ctx), (path), 0), \
-	 (void) duk_push_string((ctx), (path)), \
-	 (void) duk_eval_raw((ctx), NULL, 0, DUK_COMPILE_EVAL))
-
-#define duk_eval_file_noresult(ctx,path)  \
-	((void) duk_push_string_file_raw((ctx), (path), 0), \
-	 (void) duk_push_string((ctx), (path)), \
-	 (void) duk_eval_raw((ctx), NULL, 0, DUK_COMPILE_EVAL | DUK_COMPILE_NORESULT))
-
-#define duk_peval_file(ctx,path)  \
-	((void) duk_push_string_file_raw((ctx), (path), DUK_STRING_PUSH_SAFE), \
-	 (void) duk_push_string((ctx), (path)), \
-	 duk_eval_raw((ctx), NULL, 0, DUK_COMPILE_EVAL | DUK_COMPILE_SAFE))
-
-#define duk_peval_file_noresult(ctx,path)  \
-	((void) duk_push_string_file_raw((ctx), (path), DUK_STRING_PUSH_SAFE), \
-	 (void) duk_push_string((ctx), (path)), \
-	 duk_eval_raw((ctx), NULL, 0, DUK_COMPILE_EVAL | DUK_COMPILE_SAFE | DUK_COMPILE_NORESULT))
-
-#define duk_compile_file(ctx,flags,path)  \
-	((void) duk_push_string_file_raw((ctx), (path), 0), \
-	 (void) duk_push_string((ctx), (path)), \
-	 (void) duk_compile_raw((ctx), NULL, 0, (flags)))
-
-#define duk_pcompile_file(ctx,flags,path)  \
-	((void) duk_push_string_file_raw((ctx), (path), DUK_STRING_PUSH_SAFE), \
-	 (void) duk_push_string((ctx), (path)), \
-	 duk_compile_raw((ctx), NULL, 0, (flags) | DUK_COMPILE_SAFE))
 
 /*
  *  Bytecode load/dump

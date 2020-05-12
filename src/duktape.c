@@ -99556,73 +99556,7 @@ DUK_INTERNAL duk_double_t duk_util_tinyrandom_get_double(duk_hthread *thr) {
 	return t;
 }
 #endif  /* DUK__RANDOM_SHAMIR3OP */
-#ifdef DUK_USE_FILE_IO
-/* This is a bit clunky because it is ANSI C portable.  Should perhaps
- * relocate to another file because this is potentially platform
- * dependent.
- */
-DUK_EXTERNAL const char *duk_push_string_file_raw(duk_context *ctx, const char *path, duk_uint_t flags) {
-	duk_hthread *thr = (duk_hthread *) ctx;
-	duk_file *f = NULL;
-	char *buf;
-	long sz;  /* ANSI C typing */
 
-	if (!path) {
-		goto fail;
-	}
-	f = DUK_FOPEN(path, "rb");
-	if (!f) {
-		goto fail;
-	}
-	if (DUK_FSEEK(f, 0, SEEK_END) < 0) {
-		goto fail;
-	}
-	sz = DUK_FTELL(f);
-	if (sz < 0) {
-		goto fail;
-	}
-	if (DUK_FSEEK(f, 0, SEEK_SET) < 0) {
-		goto fail;
-	}
-	buf = (char *) duk_push_fixed_buffer(ctx, (duk_size_t) sz);
-	DUK_ASSERT(buf != NULL);
-	if ((duk_size_t) DUK_FREAD(buf, 1, (size_t) sz, f) != (duk_size_t) sz) {
-		goto fail;
-	}
-	(void) DUK_FCLOSE(f);  /* ignore fclose() error */
-	f = NULL;
-	return duk_to_string(ctx, -1);
-
- fail:
-	if (f) {
-		DUK_FCLOSE(f);
-	}
-
-	if (flags != 0) {
-		DUK_ASSERT(flags == DUK_STRING_PUSH_SAFE);  /* only flag now */
-		duk_push_undefined(ctx);
-	} else {
-		/* XXX: string not shared because it is conditional */
-		DUK_ERROR(thr, DUK_ERR_TYPE_ERROR, "read file error");
-	}
-	return NULL;
-}
-#else
-DUK_EXTERNAL const char *duk_push_string_file_raw(duk_context *ctx, const char *path, duk_uint_t flags) {
-	duk_hthread *thr = (duk_hthread *) ctx;
-
-	DUK_UNREF(path);
-
-	if (flags != 0) {
-		DUK_ASSERT(flags == DUK_STRING_PUSH_SAFE);  /* only flag now */
-		duk_push_undefined(ctx);
-	} else {
-		/* XXX: string not shared because it is conditional */
-		DUK_ERROR(thr, DUK_ERR_TYPE_ERROR, "file I/O disabled");
-	}
-	return NULL;
-}
-#endif  /* DUK_USE_FILE_IO */
 
 #if defined(DUK__RANDOM_XOROSHIRO128PLUS)
 DUK_LOCAL DUK_ALWAYS_INLINE duk_uint64_t duk__rnd_splitmix64(duk_uint64_t *x) {

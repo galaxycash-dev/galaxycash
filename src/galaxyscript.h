@@ -34,6 +34,8 @@ void GSShutdown();
 
 bool GSCompileModule(const std::string &name, const std::string &filename);
 bool GSExec(const std::string &code);
+bool GSLoadBinary(const std::vector<uint8_t> &code);
+bool GSExexBinary(const std::vector<uint8_t> &code);
 
 class CVirtualMachine {
 public:

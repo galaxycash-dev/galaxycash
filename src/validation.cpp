@@ -2987,7 +2987,7 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
     // Checking difficulty
     const Consensus::Params& consensusParams = Params().GetConsensus();
     if (!(block.nFlags & CBlockIndex::BLOCK_SUBSIDY) && (pindexPrev->nHeight >= consensusParams.nLastPoW)) {
-        int nDiffBits = pindexPrev ? GetNextTargetRequired(pindexPrev, CBlockHeader::ALGO_X12, true, consensusParams) : consensusParams.powLimit.GetCompact();
+        int nDiffBits = pindexPrev ? GetNextTargetRequired(pindexPrev, block.GetAlgorithm(), block.IsProofOfStake(), consensusParams) : consensusParams.powLimit.GetCompact();
         if (block.nBits != nDiffBits) 
             return state.Invalid(false, REJECT_INVALID, "bad-diffbits", "bad difficulty");
     }
@@ -3184,7 +3184,7 @@ bool CChainState::AcceptBlock(const std::shared_ptr<const CBlock>& pblock, CVali
         return state.DoS(100, false, REJECT_INVALID, "bad-block-type", false, "proof of stake wave is not started");      
     }
 
-    if (!pblock->IsDeveloperBlock() && pblock->IsProofOfWork() && (nHeight > chainparams.GetConsensus().nLastPoW)) {
+    if (!pblock->IsDeveloperBlock() && pblock->IsProofOfWork() && (nHeight < 650000) && (nHeight > chainparams.GetConsensus().nLastPoW)) {
         pindex->nStatus |= BLOCK_FAILED_VALID;
         setDirtyBlockIndex.insert(pindex);
         return state.DoS(100, false, REJECT_INVALID, "bad-block-type", false, "proof of work wave is ended");      

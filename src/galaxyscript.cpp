@@ -2,6 +2,7 @@
 // Copyright (c) 2009-2017 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <chainparams.h>
 #include <galaxycash.h>
 #include <galaxyscript.h>
@@ -12,13 +13,16 @@
 #include <stdint.h>
 #include <uint256.h>
 #include <util.h>
-
+#include <netbase.h>
+#include <net.h>
 #include <regex>
 
 extern "C" {
     #include "duktape.c"
 }
 #include <dukglue/dukglue.h>
+
+static duk_context *ctx = nullptr;
 
 #define BIT(x) (1 << x)
 static const std::regex ext_json(
@@ -48,696 +52,574 @@ std::string RandName()
     return name;
 }
 
-#include <fcntl.h>
+#define  DUK_COMMONJS_MODULE_ID_LIMIT  256
 
-//example:
-//  write(stdin_fileno, buffer, size)
-//  read(stdout_fileno, buffer, size)
-typedef struct {
-    void* proc;
-    int pid;
-    int stdin_fileno;
-    int stdout_fileno;
-}subprocess_t;
-
-
-static duk_context *ctx = nullptr;
-
-
-//linux maybe utf-8
-#ifdef WIN32
-#define DUKLIB_DEFAULT_SYSENCODING    "GBK"
-
-
-#ifdef _MSC_VER
-#pragma warning(disable:4996)
-#endif
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <fcntl.h>
+#define _GNU_SOURCE
 #include <errno.h>
-
-
-
-#include <windows.h>
-#include <io.h>
-
-
-
-//  parent ---write---> pipe ---read---> child
-//         inheritance        heritance
-static BOOL _create_pipe_stdin(HANDLE* stdin_rd, HANDLE* stdin_wr);
-
-//  parent <---read--- pipe <---write--- child
-//         inheritance       heritance
-static BOOL _create_pipe_stdout(HANDLE* stdout_rd, HANDLE* stdout_wr);
-
-static int _parse_environment_path_var(char** * result);
-static void _destroy_environment_path_result(char** result, int nr_paths);
-static BOOL _is_file_exists(const char* fn);
-static char* _find_image_path(char* file);
-static char* _combine_args(char* args[]);
-
-
-BOOL _create_pipe_stdin(HANDLE* stdin_rd, HANDLE* stdin_wr)
-{
-    HANDLE pipe_rd;
-    HANDLE pipe_wr;
-    HANDLE pipe_wr_dup;
-    SECURITY_ATTRIBUTES attr; 
-    BOOL success;
-
-    //prepare stdout pipe
-    ZeroMemory(&attr, sizeof(attr));
-    attr.nLength               = sizeof(attr);
-    attr.bInheritHandle        = TRUE;
-    attr.lpSecurityDescriptor  = NULL;
-    success = CreatePipe(&pipe_rd, &pipe_wr, &attr, 0);
-    if (!success) {
-        return FALSE;
-    }
-
-    success = DuplicateHandle(GetCurrentProcess(), pipe_wr,
-            GetCurrentProcess(), &pipe_wr_dup,
-            0, FALSE, DUPLICATE_SAME_ACCESS);
-    if (!success) {
-        CloseHandle(pipe_rd);
-        CloseHandle(pipe_wr);
-        return FALSE;
-    }
-
-    CloseHandle(pipe_wr);
-    *stdin_rd = pipe_rd;
-    *stdin_wr = pipe_wr_dup;
-
-    return TRUE;
-}
-
-BOOL _create_pipe_stdout(HANDLE* stdout_rd, HANDLE* stdout_wr)
-{
-    HANDLE pipe_wr;
-    HANDLE pipe_rd;
-    HANDLE pipe_rd_dup;
-    SECURITY_ATTRIBUTES attr; 
-    BOOL success;
-
-    //prepare stdout pipe
-    ZeroMemory(&attr, sizeof(attr));
-    attr.nLength               = sizeof(attr);
-    attr.bInheritHandle        = TRUE;
-    attr.lpSecurityDescriptor  = NULL;
-    success = CreatePipe(&pipe_rd, &pipe_wr, &attr, 0);
-    if (!success) {
-        return FALSE;
-    }
-
-    success = DuplicateHandle(GetCurrentProcess(), pipe_rd,
-            GetCurrentProcess(), &pipe_rd_dup,
-            0, FALSE, DUPLICATE_SAME_ACCESS);
-    if (!success) {
-        CloseHandle(pipe_rd);
-        CloseHandle(pipe_wr);
-        return FALSE;
-    }
-
-    CloseHandle(pipe_rd);
-    *stdout_rd = pipe_rd_dup;
-    *stdout_wr = pipe_wr;
-
-    return TRUE;
-}
-
-int _parse_environment_path_var(char** * result)
-{
-    char* env_path;
-    int nr_bytes;//inclued '\0'
-
-    char** paths = NULL;
-    int nr_paths = 0;
-
-    char* pend;
-    char* prev;
-    char* p;
-    char* q;
-
-    int i;
-
-    ////Test
-    //SetEnvironmentVariable("PATH", "C:\\Windows ; C:\\Windows\\System32; ;");
-
-    nr_bytes = GetEnvironmentVariable("PATH", NULL, 0);
-    if (nr_bytes > 0) {
-        env_path = (char*)malloc(nr_bytes);
-        GetEnvironmentVariable("PATH", env_path, nr_bytes);
-        for (i = 0;i < nr_bytes;i++) {
-            if (env_path[i] == '/') {
-                env_path[i] = '\\';
-            }
-        }
-
-        prev = NULL;
-        pend = env_path + nr_bytes-1;
-        p = env_path;
-
-        while (p < pend) {
-            if ((prev == NULL) && !isspace(*p)) {
-                prev = p;
-                continue;
-            } 
-            
-            if (*p == ';') {
-                if (prev != NULL) {
-                    for (q = p;prev < q;q--) {
-                        if (!isspace(q[-1])) {
-                            break;
-                        }
-                    }
-
-                    if (q - prev > 0) {
-                        if (paths == NULL) {
-                            nr_paths = 0;
-                            paths = (char**)malloc(sizeof(char*) * (nr_paths + 1));
-                        } else {
-                            paths = (char**)realloc(paths, sizeof(char*) * (nr_paths + 1));
-                        }
-
-                        paths[nr_paths] = (char*)malloc(q - prev + 1);
-                        memset(paths[nr_paths], 0, q - prev + 1);
-                        memcpy(paths[nr_paths], prev, q - prev);
-
-                        nr_paths++;
-                    }
-                }
-                prev = NULL;
-            }
-
-            p++;
-        }
-    }
-
-    *result = paths;
-
-    return nr_paths;
-}
-
-void _destroy_environment_path_result(char** result, int nr_paths)
-{
-    int i;
-
-    for (i = 0;i < nr_paths;i++) {
-        free(result[i]);
-    }
-
-    free(result);
-}
-
-BOOL _is_file_exists(const char* fn)
-{
-    fs::path p = fn;
-    if (!fs::exists(p)) return FALSE;
-    if (fs::is_directory(p)) return FALSE;
-    return TRUE;
-}
-
-char* _find_image_path(char* file)
-{
-    char* appname = NULL;
-
-    char** paths;
-    int nr_paths;
-    int path_size;
-    char* args0;
-    int args0_size;
-    char ext[4];
-    int i;
-
-    ////////////////////////////////////////////////////////
-    //check extension name
-    args0_size = strlen(file);
-    if (args0_size <= 0) {
-        return NULL;
-    }
-
-    args0 = (char*)malloc(args0_size + 4 + 1);
-    memset(args0, 0, args0_size + 4 + 1);
-    memcpy(args0, file, args0_size);
-    memcpy(ext, args0 + args0_size - 4, 4);
-
-    ext[0] = tolower(ext[0]);
-    ext[1] = tolower(ext[1]);
-    ext[2] = tolower(ext[2]);
-    ext[3] = tolower(ext[3]);
-    if (strncmp(ext, ".exe", 4) != 0) {
-        strcat(args0, ".exe");
-    }
-    args0_size = strlen(args0);
-
-    if ((args0[0] == '.') && (args0[1] == '\\')) {
-        return args0;
-    } 
-    if ((args0[0] == '.') && (args0[1] == '.') && (args0[2] == '\\')) {
-        return args0;
-    } 
-    if (_is_file_exists(args0)) {
-        return args0;
-    }
-
-    ////////////////////////////////////////////////////////
-    //build appname from PATH environment
-    nr_paths = _parse_environment_path_var(&paths);
-    if (nr_paths <= 0) {
-        return args0;
-    }
-
-    for (i = 0;i < nr_paths;i++) {
-        path_size = strlen(paths[i]);
-        appname = (char*)malloc(path_size + 1 + args0_size + 1);
-        memset(appname, 0, path_size + 1 + args0_size + 1);
-        memcpy(appname, paths[i], path_size);
-        if (appname[path_size-1] != '\\') {
-            appname[path_size++] = '\\';
-        }
-        memcpy(appname+path_size, args0, args0_size);
-
-        if (_is_file_exists(appname)) {
-            free(args0);
-            args0 = appname;
-            break;
-        }
-
-        free(appname);
-        appname = NULL;
-    }
-
-    _destroy_environment_path_result(paths, nr_paths);
-
-    return args0;
-}
-
-char* _combine_args(char* args[])
-{
-    char* cmdline = NULL;
-    int cmdline_size = 0;
-    int n_str;
-
-    while (*args != NULL) {
-        n_str = strlen(*args);
-        if (cmdline == NULL) {
-            cmdline_size = 0;
-            cmdline = (char*)malloc(n_str + 1);
-        } else {
-            cmdline = (char*)realloc(cmdline, cmdline_size + 1 + n_str + 1);
-        }
-
-        memcpy(&cmdline[cmdline_size], *args, n_str);
-        cmdline_size += n_str;
-        if (*(args+1) != NULL) {
-            cmdline[cmdline_size++] = ' ';
-        }
-        cmdline[cmdline_size] = '\0';
-
-        args++;
-    }
-
-    return cmdline;
-}
-
-
-subprocess_t* psopen(char* file, char* args[])
-{
-    subprocess_t* ps = NULL;
-    HANDLE stdout_wr = INVALID_HANDLE_VALUE;
-    HANDLE stdout_rd = INVALID_HANDLE_VALUE;
-    HANDLE stdin_wr  = INVALID_HANDLE_VALUE;
-    HANDLE stdin_rd  = INVALID_HANDLE_VALUE;
-    int h_stdout_rd  = -1;
-    int h_stdin_wr   = -1;
-    char* appname = NULL;
-    char* cmdline = NULL;
-    STARTUPINFO si;
-    PROCESS_INFORMATION pi;
-    BOOL success;
-
-    ////////////////////////////////////////////////////////
-    if ((args == NULL) || (args[0] == NULL)) {
-        return NULL;
-    }
-
-    if (file != NULL) {
-        appname = _find_image_path(file);
-    } else {
-        appname = _find_image_path(args[0]);
-    }
-    if (appname == NULL) {
-        return NULL;
-    }
-    cmdline = _combine_args(args);
-    if (cmdline == NULL) {
-        free(appname);
-        return NULL;
-    }
-
-    ////////////////////////////////////////////////////////
-    success = _create_pipe_stdout(&stdout_rd, &stdout_wr);
-    if (!success) {
-        goto L_ERROR;
-    }
-
-    success = _create_pipe_stdin(&stdin_rd, &stdin_wr);
-    if (!success) {
-        goto L_ERROR;
-    }
-
-    ////////////////////////////////////////////////////////
-    h_stdin_wr = _open_osfhandle((intptr_t)stdin_wr, 0);
-    if (h_stdin_wr == -1) {
-        goto L_ERROR;
-    }
-    stdin_wr = INVALID_HANDLE_VALUE;
-
-    h_stdout_rd = _open_osfhandle((intptr_t)stdout_rd, 0);
-    if (h_stdin_wr == -1) {
-        goto L_ERROR;
-    }
-    stdout_rd = INVALID_HANDLE_VALUE;
-
-    ////////////////////////////////////////////////////////
-    ZeroMemory(&si, sizeof(si));
-    si.cb           = sizeof(si);
-    si.hStdInput    = stdin_rd;
-    si.hStdOutput   = stdout_wr;
-    si.hStdError    = stdout_wr;
-    si.dwFlags      = STARTF_USESTDHANDLES;
-
-    // Start the child process.
-    // XXX: found exe from PATH, then set lpApplicationName!
-    success = CreateProcess(
-        appname,            //lpApplicationName
-        cmdline,            //lpCommandLine
-        //NULL,               //lpApplicationName
-        //cmdline,            //lpCommandLine
-        NULL,               //lpProcessAttributes for Security
-        NULL,               //lpThreadAttributes for Security
-        TRUE,               //bInHeritanceHandles
-        CREATE_NO_WINDOW,   //dwCreationFlags
-        NULL,               //lpEnvironment
-        NULL,               //lpCurrentDirectory
-        &si,                //lpStartupInfo
-        &pi                 //lpProcessInformation
-    );
-
-    if (!success) {
-        goto L_ERROR;
-    }
-
-    ////////////////////////////////////////////////////////
-    free(appname);
-    appname = NULL;
-    free(cmdline);
-    cmdline = NULL;
-
-    CloseHandle(pi.hThread);
-
-    // handle have hold by child, no need to have it.
-    CloseHandle(stdout_wr);
-    stdout_wr = INVALID_HANDLE_VALUE;
-    CloseHandle(stdin_rd);
-    stdin_rd = INVALID_HANDLE_VALUE;
-
-    ps = (subprocess_t*)malloc(sizeof(subprocess_t));
-    ps->pid             = GetProcessId(pi.hProcess);
-    ps->proc            = (void*)pi.hProcess;
-    ps->stdin_fileno    = h_stdin_wr;
-    ps->stdout_fileno   = h_stdout_rd;
-
-    return ps;
-
-L_ERROR:
-    if (appname != NULL) {
-        free(appname);
-    }
-    if (cmdline != NULL) {
-        free(cmdline);
-    }
-    if (h_stdout_rd != -1) {
-        close(h_stdout_rd);
-    }
-    if (h_stdin_wr != -1) {
-        close(h_stdin_wr);
-    }
-    if (stdout_wr != INVALID_HANDLE_VALUE) {
-        CloseHandle(stdout_wr);
-    }
-    if (stdout_rd != INVALID_HANDLE_VALUE) {
-        CloseHandle(stdout_rd);
-    }
-    if (stdin_wr != INVALID_HANDLE_VALUE) {
-        CloseHandle(stdin_wr);
-    }
-    if (stdin_rd != INVALID_HANDLE_VALUE) {
-        CloseHandle(stdin_rd);
-    }
-
-    return NULL;
-}
-
-int pswait(subprocess_t* ps)
-{
-    DWORD exitcode = 0;
-
-    if (ps == NULL) {
-        return -1;
-    }
-
-    if ((HANDLE)ps->proc != INVALID_HANDLE_VALUE) {
-        WaitForSingleObject((HANDLE)ps->proc, INFINITE);
-        if (!GetExitCodeProcess((HANDLE)ps->proc, &exitcode)) {
-            exitcode = -1;
-        }
-
-        close(ps->stdin_fileno);
-        close(ps->stdout_fileno);
-        CloseHandle((HANDLE)ps->proc);
-
-        ps->proc = (void*)INVALID_HANDLE_VALUE;
-    }
-
-    return exitcode;
-}
-
-void psclose(subprocess_t* ps)
-{
-    if (ps == NULL) {
-        return;
-    }
-
-    if ((HANDLE)ps->proc != INVALID_HANDLE_VALUE) {
-        close(ps->stdin_fileno);
-        close(ps->stdout_fileno);
-
-        WaitForSingleObject((HANDLE)ps->proc, 10);
-        CloseHandle((HANDLE)ps->proc);
-
-        ps->proc = (void*)INVALID_HANDLE_VALUE;
-    }
-
-    free(ps);
-}
-
-#else
-
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-
-#include <sys/wait.h>
+#include <stdio.h>
 #include <unistd.h>
-#include <signal.h>
-
-//  parent ---write---> pipe ---read---> child
-//         inheritance        heritance
-static int _create_pipe_stdin(int* stdin_rd, int* stdin_wr);
-
-//  parent <---read--- pipe <---write--- child
-//         inheritance       heritance
-static int _create_pipe_stdout(int* stdout_rd, int* stdout_wr);
-
-
-int _create_pipe_stdin(int* stdin_rd, int* stdin_wr)
-{
-    int h[2];
-    int h_rd;
-
-    if (pipe(h) < 0) {
-        return -1;
-    }
-
-    h_rd = dup(h[0]);
-    close(h[0]);
-
-    *stdin_rd = h_rd;
-    *stdin_wr = h[1];
-
-    return 0;
-}
-
-int _create_pipe_stdout(int* stdout_rd, int* stdout_wr)
-{
-    int h[2];
-    int h_wr;
-
-    if (pipe(h) < 0) {
-        return -1;
-    }
-
-    h_wr = dup(h[1]);
-    close(h[1]);
-
-    *stdout_rd = h[0];
-    *stdout_wr = h_wr;
-
-    return 0;
-}
-
-subprocess_t* psopen(char* file, char* args[])
-{
-    subprocess_t* ps;
-    pid_t pid; 
-    int stdin_wr;
-    int stdin_rd;
-    int stdout_wr;
-    int stdout_rd;
-
-    if (_create_pipe_stdin(&stdin_rd, &stdin_wr) < 0) {
-        return NULL;
-    }
-    if (_create_pipe_stdout(&stdout_rd, &stdout_wr) < 0) {
-        close(stdin_rd);
-        close(stdin_wr);
-        return NULL;
-    }
-
-    pid = vfork();
-    if (pid < 0) {
-        close(stdin_rd);
-        close(stdin_wr);
-        close(stdout_rd);
-        close(stdout_wr);
-        return NULL;
-    }
-
-    if (pid == 0) {
-        //_exit() do not flush then close standard I/O
-        //so I just use exit()
-        if (dup2(stdin_rd, STDIN_FILENO) < 0) {
-            exit(-1);
-        }
-        if (dup2(stdout_wr, STDOUT_FILENO) < 0) {
-            exit(-1);
-        }
-        execvp(args[0], args);
-        exit(-1);
-    }
-    
-    close(stdin_rd);
-    close(stdout_wr);
-
-    ps = (subprocess_t*)malloc(sizeof(subprocess_t));
-    ps->pid             = pid;
-    ps->proc            = (void*)pid;
-    ps->stdin_fileno    = stdin_wr;
-    ps->stdout_fileno   = stdout_rd;
-
-    return ps;
-}
-
-
-int pswait(subprocess_t* ps)
-{
-    int status;
-    int returncode = 0;
-
-    if (ps->pid > 0) {
-        if (waitpid(ps->pid , &status, 0) == -1) {
-            returncode = -1;
-        } else {
-            returncode = (char)(status >> 8);
-        }
-        ps->pid = 0;
-
-        close(ps->stdin_fileno);
-        close(ps->stdout_fileno);
-    }
-
-    return returncode;
-}
-
-void psclose(subprocess_t* ps)
-{
-    int i;
-    int signals[] = {SIGINT, SIGTERM, SIGABRT, SIGKILL};
-
-    if (ps->pid > 0) {
-        close(ps->stdin_fileno);
-        close(ps->stdout_fileno);
-
-        for (i = 0;i < sizeof(signals)/sizeof(signals[0]);i++) {
-            if (kill(ps->pid, 0) == -1) {
-                break;
-            }
-            kill(ps->pid, signals[i]);
-            usleep(10 * 1000);
-        }
-
-        ps->pid = 0;
-    }
-
-    free(ps);
-}
+#include <fcntl.h>
+#ifndef WIN32
+#include <netdb.h>
+#endif
+#include <sys/types.h>
+#ifndef WIN32
+#include <sys/socket.h>
+#endif
+#include <time.h>
+#ifdef EVENT__HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#ifdef _XOPEN_SOURCE_EXTENDED
+#include <arpa/inet.h>
+#endif
 #endif
 
 
-int gs_include(duk_context* ctx, const char* fn);
-int gs_eval_string(duk_context* ctx, const char* s);
+#ifndef WIN32
+#include <unistd.h>
+#else 
+#include <sys/unistd.h>
+#include <direct.h>
+#endif
 
-int gs_put_args(duk_context* ctx, int argc, char* argv[]);
+#ifdef WIN32
+#include <winsock2.h>
+#include <wincrypt.h>
+#define poll WSAPoll
+#else
+#include <poll.h>
+#endif
 
-//nr_vars DUK_VARARGS
-int gs_put_c_method(duk_context* ctx,
-        const char* function_name,
-        duk_c_function function_entry);
+#if defined(__cplusplus)
+extern "C" {
+#endif
 
-int gs_put_c_function(duk_context* ctx,
-        const char* function_name,
-        duk_c_function function_entry);
+/* Straight flag rename */
+#if !defined(DUK_ENUM_INCLUDE_INTERNAL)
+#define DUK_ENUM_INCLUDE_INTERNAL DUK_ENUM_INCLUDE_HIDDEN
+#endif
 
-const char* gs_type_name(duk_context* ctx, duk_idx_t index);
+/* Flags for duk_push_string_file_raw() */
+#define DUK_STRING_PUSH_SAFE              (1 << 0)    /* no error if file does not exist */
+
+extern void duk_dump_context_stdout(duk_context *ctx);
+extern void duk_dump_context_stderr(duk_context *ctx);
+extern const char *duk_push_string_file_raw(duk_context *ctx, const char *path, duk_uint_t flags);
+extern void duk_eval_file(duk_context *ctx, const char *path);
+extern void duk_eval_file_noresult(duk_context *ctx, const char *path);
+extern duk_int_t duk_peval_file(duk_context *ctx, const char *path);
+extern duk_int_t duk_peval_file_noresult(duk_context *ctx, const char *path);
+extern void duk_compile_file(duk_context *ctx, duk_uint_t flags, const char *path);
+extern duk_int_t duk_pcompile_file(duk_context *ctx, duk_uint_t flags, const char *path);
+extern void duk_to_defaultvalue(duk_context *ctx, duk_idx_t idx, duk_int_t hint);
+
+#define duk_push_string_file(ctx,path) \
+	duk_push_string_file_raw((ctx), (path), 0)
+
+#if defined(__cplusplus)
+}
+#endif  /* end 'extern "C"' wrapper */
+
+/*
+ *  duk_dump_context_{stdout,stderr}()
+ */
+
+void duk_dump_context_stdout(duk_context *ctx) {
+	duk_push_context_dump(ctx);
+	fprintf(stdout, "%s\n", duk_safe_to_string(ctx, -1));
+	duk_pop(ctx);
+}
+
+void duk_dump_context_stderr(duk_context *ctx) {
+	duk_push_context_dump(ctx);
+	fprintf(stderr, "%s\n", duk_safe_to_string(ctx, -1));
+	duk_pop(ctx);
+}
+
+/*
+ *  duk_push_string_file() and duk_push_string_file_raw()
+ */
+
+const char *duk_push_string_file_raw(duk_context *ctx, const char *path, duk_uint_t flags) {
+	FILE *f = NULL;
+	char *buf;
+	long sz;  /* ANSI C typing */
+
+	if (!path) {
+		goto fail;
+	}
+	f = fopen(path, "rb");
+	if (!f) {
+		goto fail;
+	}
+	if (fseek(f, 0, SEEK_END) < 0) {
+		goto fail;
+	}
+	sz = ftell(f);
+	if (sz < 0) {
+		goto fail;
+	}
+	if (fseek(f, 0, SEEK_SET) < 0) {
+		goto fail;
+	}
+	buf = (char *) duk_push_fixed_buffer(ctx, (duk_size_t) sz);
+	if ((size_t) fread(buf, 1, (size_t) sz, f) != (size_t) sz) {
+		duk_pop(ctx);
+		goto fail;
+	}
+	(void) fclose(f);  /* ignore fclose() error */
+	return duk_buffer_to_string(ctx, -1);
+
+ fail:
+	if (f) {
+		(void) fclose(f);  /* ignore fclose() error */
+	}
+
+	if (flags & DUK_STRING_PUSH_SAFE) {
+		duk_push_undefined(ctx);
+	} else {
+		(void) duk_type_error(ctx, "read file error");
+	}
+	return NULL;
+}
+
+/*
+ *  duk_eval_file(), duk_compile_file(), and their variants
+ */
+
+void duk_eval_file(duk_context *ctx, const char *path) {
+	duk_push_string_file_raw(ctx, path, 0);
+	duk_push_string(ctx, path);
+	duk_compile(ctx, DUK_COMPILE_EVAL);
+	duk_push_global_object(ctx);  /* 'this' binding */
+	duk_call_method(ctx, 0);
+}
+
+void duk_eval_file_noresult(duk_context *ctx, const char *path) {
+	duk_eval_file(ctx, path);
+	duk_pop(ctx);
+}
+
+duk_int_t duk_peval_file(duk_context *ctx, const char *path) {
+	duk_int_t rc;
+
+	duk_push_string_file_raw(ctx, path, DUK_STRING_PUSH_SAFE);
+	duk_push_string(ctx, path);
+	rc = duk_pcompile(ctx, DUK_COMPILE_EVAL);
+	if (rc != 0) {
+		return rc;
+	}
+	duk_push_global_object(ctx);  /* 'this' binding */
+	rc = duk_pcall_method(ctx, 0);
+	return rc;
+}
+
+duk_int_t duk_peval_file_noresult(duk_context *ctx, const char *path) {
+	duk_int_t rc;
+
+	rc = duk_peval_file(ctx, path);
+	duk_pop(ctx);
+	return rc;
+}
+
+void duk_compile_file(duk_context *ctx, duk_uint_t flags, const char *path) {
+	duk_push_string_file_raw(ctx, path, 0);
+	duk_push_string(ctx, path);
+	duk_compile(ctx, flags);
+}
+
+duk_int_t duk_pcompile_file(duk_context *ctx, duk_uint_t flags, const char *path) {
+	duk_int_t rc;
+
+	duk_push_string_file_raw(ctx, path, DUK_STRING_PUSH_SAFE);
+	duk_push_string(ctx, path);
+	rc = duk_pcompile(ctx, flags);
+	return rc;
+}
+
+/*
+ *  duk_to_defaultvalue()
+ */
+
+void duk_to_defaultvalue(duk_context *ctx, duk_idx_t idx, duk_int_t hint) {
+	duk_require_type_mask(ctx, idx, DUK_TYPE_MASK_OBJECT |
+	                                DUK_TYPE_MASK_BUFFER |
+	                                DUK_TYPE_MASK_LIGHTFUNC);
+	duk_to_primitive(ctx, idx, hint);
+}
 
 
-int dukopen_gs(duk_context* ctx);
+#define  ERROR_FROM_ERRNO(ctx)  do { \
+		error("%s (errno=%d)", strerror(errno), errno); \
+	} while (0)
 
-//windows:
-//  file != NULL: file + " " + args[1] + " " + args[2] + " " + ...
-//  file == NULL: args[0] + " " + args[1] + " " + args[2] + " " + ...
-//
-//linux: 
-//  execvp(file, args);
-//
-subprocess_t* psopen(char* file, char* args[]);
+static void set_nonblocking(duk_context *ctx, int fd) {
+#ifndef WIN32
+	int rc;
+	int flags;
 
-//wait child exit or terminated, then close all handle.
-int pswait(subprocess_t* ps);
+	rc = fcntl(fd, F_GETFL);
+	if (rc < 0) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+	flags = rc;
 
-//kill child if not exist nor terminated, then close all handle, and free all.
-void psclose(subprocess_t* ps);
+	flags |= O_NONBLOCK;
 
+	rc = fcntl(fd, F_SETFL, flags);
+	if (rc < 0) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+#else
+    unsigned long argp = 1;
+    ioctlsocket(fd, FIONBIO, &argp);
+#endif
+}
 
+static void set_reuseaddr(duk_context *ctx, int fd) {
+	int val;
+	int rc;
+
+	val = 1;
+	rc = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *) &val, sizeof(val));
+	if (rc != 0) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+}
+
+#if defined(__APPLE__)
+static void set_nosigpipe(duk_context *ctx, int fd) {
+	int val;
+	int rc;
+
+	val = 1;
+	rc = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (const void *) &val, sizeof(val));
+	if (rc != 0) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+}
+#endif
+
+static int socket_create_server_socket(duk_context *ctx) {
+	const char *addr = duk_to_string(ctx, 0);
+	int port = duk_to_int(ctx, 1);
+	int sock;
+	struct sockaddr_in sockaddr;
+	struct hostent *ent;
+	struct in_addr **addr_list;
+	struct in_addr *addr_inet;
+	int i;
+	int rc;
+
+	sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+
+	set_nonblocking(ctx, sock);
+	set_reuseaddr(ctx, sock);
+#if defined(__APPLE__)
+	set_nosigpipe(ctx, sock);
+#endif
+
+	ent = gethostbyname(addr);
+	if (!ent) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+
+	addr_list = (struct in_addr **) ent->h_addr_list;
+	addr_inet = NULL;
+	for (i = 0; addr_list[i]; i++) {
+		addr_inet = addr_list[i];
+		break;
+	}
+	if (!addr_inet) {
+		(void) duk_error(ctx, DUK_ERR_ERROR, "cannot resolve %s", addr);
+	}
+
+	memset(&sockaddr, 0, sizeof(sockaddr));
+	sockaddr.sin_family = AF_INET;
+	sockaddr.sin_port = htons(port);
+	sockaddr.sin_addr = *addr_inet;
+
+	rc = bind(sock, (const struct sockaddr *) &sockaddr, sizeof(sockaddr));
+	if (rc < 0) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+
+	rc = listen(sock, 10 /*backlog*/);
+	if (rc < 0) {
+		(void) close(sock);
+		ERROR_FROM_ERRNO(ctx);
+	}
+
+	duk_push_int(ctx, sock);
+	return 1;
+}
+
+static int socket_close(duk_context *ctx) {
+	int sock = duk_to_int(ctx, 0);
+	int rc;
+
+	rc = close(sock);
+	if (rc < 0) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+	return 0;
+}
+
+static int socket_accept(duk_context *ctx) {
+	int sock = duk_to_int(ctx, 0);
+	int rc;
+	struct sockaddr_in addr;
+	socklen_t addrlen;
+
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addrlen = sizeof(addr);
+
+	rc = accept(sock, (struct sockaddr *) &addr, &addrlen);
+	if (rc < 0) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+
+	set_nonblocking(ctx, sock);
+#if defined(__APPLE__)
+	set_nosigpipe(ctx, sock);
+#endif
+
+	if (addrlen == sizeof(addr)) {
+		uint32_t tmp = ntohl(addr.sin_addr.s_addr);
+
+		duk_push_object(ctx);
+
+		duk_push_string(ctx, "fd");
+		duk_push_int(ctx, rc);
+		duk_put_prop(ctx, -3);
+		duk_push_string(ctx, "addr");
+		duk_push_sprintf(ctx, "%d.%d.%d.%d", ((tmp >> 24) & 0xff), ((tmp >> 16) & 0xff), ((tmp >> 8) & 0xff), (tmp & 0xff));
+		duk_put_prop(ctx, -3);
+		duk_push_string(ctx, "port");
+		duk_push_int(ctx, ntohs(addr.sin_port));
+		duk_put_prop(ctx, -3);
+
+		return 1;
+	}
+
+	return 0;
+}
+
+static int socket_connect(duk_context *ctx) {
+	const char *addr = duk_to_string(ctx, 0);
+	int port = duk_to_int(ctx, 1);
+	int sock;
+	struct sockaddr_in sockaddr;
+	struct hostent *ent;
+	struct in_addr **addr_list;
+	struct in_addr *addr_inet;
+	int i;
+	int rc;
+
+	sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+
+	set_nonblocking(ctx, sock);
+#if defined(__APPLE__)
+	set_nosigpipe(ctx, sock);
+#endif
+
+	ent = gethostbyname(addr);
+	if (!ent) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+
+	addr_list = (struct in_addr **) ent->h_addr_list;
+	addr_inet = NULL;
+	for (i = 0; addr_list[i]; i++) {
+		addr_inet = addr_list[i];
+		break;
+	}
+	if (!addr_inet) {
+		(void) duk_error(ctx, DUK_ERR_ERROR, "cannot resolve %s", addr);
+	}
+
+	memset(&sockaddr, 0, sizeof(sockaddr));
+	sockaddr.sin_family = AF_INET;
+	sockaddr.sin_port = htons(port);
+	sockaddr.sin_addr = *addr_inet;
+
+	rc = connect(sock, (const struct sockaddr *) &sockaddr, (socklen_t) sizeof(sockaddr));
+	if (rc < 0) {
+		if (errno == EINPROGRESS) {
+            LogErrorStr("connect() returned EINPROGRESS as expected, need to poll writability\n");
+		} else {
+			ERROR_FROM_ERRNO(ctx);
+		}
+	}
+
+	duk_push_int(ctx, sock);
+	return 1;
+}
+
+static int socket_read(duk_context *ctx) {
+	int sock = duk_to_int(ctx, 0);
+	char readbuf[1024];
+	int rc;
+	void *data;
+
+	rc = recvfrom(sock, readbuf, sizeof(readbuf), 0, NULL, NULL);
+	if (rc < 0) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+
+	data = duk_push_fixed_buffer(ctx, rc);
+	memcpy(data, readbuf, rc);
+	return 1;
+}
+
+static int socket_write(duk_context *ctx) {
+	int sock = duk_to_int(ctx, 0);
+	const char *data;
+	size_t len;
+	ssize_t rc;
+
+	data = (const char *) duk_require_buffer_data(ctx, 1, &len);
+
+	/* MSG_NOSIGNAL: avoid SIGPIPE */
+#if defined(__APPLE__) || defined(WIN32)
+	rc = sendto(sock, data, len, 0, NULL, 0);
+#else
+	rc = sendto(sock, data, len, MSG_NOSIGNAL, NULL, 0);
+#endif
+	if (rc < 0) {
+		ERROR_FROM_ERRNO(ctx);
+	}
+
+	duk_push_int(ctx, rc);
+	return 1;
+}
+
+static duk_function_list_entry socket_funcs[] = {
+	{ "createServerSocket", socket_create_server_socket, 2 },
+	{ "close", socket_close, 1 },
+	{ "accept", socket_accept, 1 },
+	{ "connect", socket_connect, 2 },
+	{ "read", socket_read, 1 },
+	{ "write", socket_write, 2 },
+	{ NULL, NULL, 0 }
+};
+
+void duk_socket_register(duk_context *ctx) {
+	/* Set global 'Socket'. */
+	duk_push_global_object(ctx);
+	duk_push_object(ctx);
+	duk_put_function_list(ctx, -1, socket_funcs);
+	duk_put_prop_string(ctx, -2, "Socket");
+	duk_pop(ctx);
+}
+
+static int poll_poll(duk_context *ctx) {
+	int timeout = duk_to_int(ctx, 1);
+	int i, n, nchanged;
+	int fd, rc;
+
+	struct pollfd fds[20];
+	struct timespec ts;
+
+	memset(fds, 0, sizeof(fds));
+
+	n = 0;
+	duk_enum(ctx, 0, 0 /*enum_flags*/);
+	while (duk_next(ctx, -1, 0)) {
+		if ((size_t) n >= sizeof(fds) / sizeof(struct pollfd)) {
+			return -1;
+		}
+
+		/* [... enum key] */
+		duk_dup_top(ctx);  /* -> [... enum key key] */
+		duk_get_prop(ctx, 0);  /* -> [... enum key val] */
+		fd = duk_to_int(ctx, -2);
+
+		duk_push_string(ctx, "events");
+		duk_get_prop(ctx, -2);  /* -> [... enum key val events] */
+
+		fds[n].fd = fd;
+		fds[n].events = duk_to_int(ctx, -1);
+		fds[n].revents = 0;
+
+		duk_pop_n(ctx, 3);  /* -> [... enum] */
+
+		n++;
+	}
+	/* leave enum on stack */
+
+	memset(&ts, 0, sizeof(ts));
+	ts.tv_nsec = (timeout % 1000) * 1000000;
+	ts.tv_sec = timeout / 1000;
+
+	/*rc = ppoll(fds, n, &ts, NULL);*/
+	rc = poll(fds, n, timeout);
+	if (rc < 0) {
+		(void) duk_error(ctx, DUK_ERR_ERROR, "%s (errno=%d)", strerror(errno), errno);
+	}
+
+	duk_push_array(ctx);
+	nchanged = 0;
+	for (i = 0; i < n; i++) {
+		/* update revents */
+
+		if (fds[i].revents) {
+			duk_push_int(ctx, fds[i].fd);  /* -> [... retarr fd] */
+			duk_put_prop_index(ctx, -2, nchanged);
+			nchanged++;
+		}
+
+		duk_push_int(ctx, fds[i].fd);  /* -> [... retarr key] */
+		duk_get_prop(ctx, 0);  /* -> [... retarr val] */
+		duk_push_string(ctx, "revents");
+		duk_push_int(ctx, fds[i].revents);  /* -> [... retarr val "revents" fds[i].revents] */
+		duk_put_prop(ctx, -3);  /* -> [... retarr val] */
+		duk_pop(ctx);
+	}
+
+	/* [retarr] */
+
+	return 1;
+}
+
+static duk_function_list_entry poll_funcs[] = {
+	{ "poll", poll_poll, 2 },
+	{ NULL, NULL, 0 }
+};
+
+static duk_number_list_entry poll_consts[] = {
+	{ "POLLIN", (double) POLLIN },
+	{ "POLLPRI", (double) POLLPRI },
+	{ "POLLOUT", (double) POLLOUT },
+#if 0
+	/* Linux 2.6.17 and upwards, requires _GNU_SOURCE etc, not added
+	 * now because we don't use it.
+	 */
+	{ "POLLRDHUP", (double) POLLRDHUP },
+#endif
+	{ "POLLERR", (double) POLLERR },
+	{ "POLLHUP", (double) POLLHUP },
+	{ "POLLNVAL", (double) POLLNVAL },
+	{ NULL, 0.0 }
+};
+
+void duk_poll_register(duk_context *ctx) {
+	/* Set global 'Poll' with functions and constants. */
+	duk_push_global_object(ctx);
+	duk_push_object(ctx);
+	duk_put_function_list(ctx, -1, poll_funcs);
+	duk_put_number_list(ctx, -1, poll_consts);
+	duk_put_prop_string(ctx, -2, "Poll");
+	duk_pop(ctx);
+}
 
 /* Initialize the console system */
 extern void duk_console_init(duk_context *ctx, bool hasproxy);
@@ -974,2105 +856,1223 @@ static duk_ret_t fileio_write_file(duk_context *ctx) {
 	return 0;
 }
 
-#ifdef WIN32 
-#include <windows.h>
-#include <direct.h>
-#include <io.h>
+
+#if !defined(DUKTAPE_EVENTLOOP_DEBUG)
+#define DUKTAPE_EVENTLOOP_DEBUG 0       /* set to 1 to debug with printf */
 #endif
 
-#ifdef __linux__
-#include <unistd.h>
+#define  TIMERS_SLOT_NAME       "eventTimers"
+#define  MIN_DELAY              1.0
+#define  MIN_WAIT               1.0
+#define  MAX_WAIT               60000.0
+#define  MAX_EXPIRIES           10
+
+#define  MAX_FDS                256
+#define  MAX_TIMERS             4096     /* this is quite excessive for embedded use, but good for testing */
+
+typedef struct {
+	int64_t id;       /* numeric ID (returned from e.g. setTimeout); zero if unused */
+	double target;    /* next target time */
+	double delay;     /* delay/interval */
+	int oneshot;      /* oneshot=1 (setTimeout), repeated=0 (setInterval) */
+	int removed;      /* timer has been requested for removal */
+
+	/* The callback associated with the timer is held in the "global stash",
+	 * in <stash>.eventTimers[String(id)].  The references must be deleted
+	 * when a timer struct is deleted.
+	 */
+} ev_timer;
+
+/* Active timers.  Dense list, terminates to end of list or first unused timer.
+ * The list is sorted by 'target', with lowest 'target' (earliest expiry) last
+ * in the list.  When a timer's callback is being called, the timer is moved
+ * to 'timer_expiring' as it needs special handling should the user callback
+ * delete that particular timer.
+ */
+static ev_timer timer_list[MAX_TIMERS];
+static ev_timer timer_expiring;
+static int timer_count;  /* last timer at timer_count - 1 */
+static int64_t timer_next_id = 1;
+
+/* Socket poll state. */
+static struct pollfd poll_list[MAX_FDS];
+static int poll_count = 0;
+
+/* Misc */
+static int exit_requested = 0;
+
+/* Get Javascript compatible 'now' timestamp (millisecs since 1970). */
+static double get_now(void) {
+	struct timeval tv;
+	int rc;
+
+	rc = gettimeofday(&tv, NULL);
+	if (rc != 0) {
+		/* Should never happen, so return whatever. */
+		return 0.0;
+	}
+	return ((double) tv.tv_sec) * 1000.0 + ((double) tv.tv_usec) / 1000.0;
+}
+
+static ev_timer *find_nearest_timer(void) {
+	/* Last timer expires first (list is always kept sorted). */
+	if (timer_count <= 0) {
+		return NULL;
+	}
+	return timer_list + timer_count - 1;
+}
+
+/* Bubble last timer on timer list backwards until it has been moved to
+ * its proper sorted position (based on 'target' time).
+ */
+static void bubble_last_timer(void) {
+	int i;
+	int n = timer_count;
+	ev_timer *t;
+	ev_timer tmp;
+
+	for (i = n - 1; i > 0; i--) {
+		/* Timer to bubble is at index i, timer to compare to is
+		 * at i-1 (both guaranteed to exist).
+		 */
+		t = timer_list + i;
+		if (t->target <= (t-1)->target) {
+			/* 't' expires earlier than (or same time as) 't-1', so we're done. */
+			break;
+		} else {
+			/* 't' expires later than 't-1', so swap them and repeat. */
+			memcpy((void *) &tmp, (void *) (t - 1), sizeof(ev_timer));
+			memcpy((void *) (t - 1), (void *) t, sizeof(ev_timer));
+			memcpy((void *) t, (void *) &tmp, sizeof(ev_timer));
+		}
+	}
+}
+
+static void expire_timers(duk_context *ctx) {
+	ev_timer *t;
+	int sanity = MAX_EXPIRIES;
+	double now;
+	int rc;
+
+	/* Because a user callback can mutate the timer list (by adding or deleting
+	 * a timer), we expire one timer and then rescan from the end again.  There
+	 * is a sanity limit on how many times we do this per expiry round.
+	 */
+
+	duk_push_global_stash(ctx);
+	duk_get_prop_string(ctx, -1, TIMERS_SLOT_NAME);
+
+	/* [ ... stash eventTimers ] */
+
+	now = get_now();
+	while (sanity-- > 0) {
+		/*
+		 *  If exit has been requested, exit without running further
+		 *  callbacks.
+		 */
+
+		if (exit_requested) {
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+			fprintf(stderr, "exit requested, exiting timer expiry loop\n");
+			fflush(stderr);
+#endif
+			break;
+		}
+
+		/*
+		 *  Expired timer(s) still exist?
+		 */
+
+		if (timer_count <= 0) {
+			break;
+		}
+		t = timer_list + timer_count - 1;
+		if (t->target > now) {
+			break;
+		}
+
+		/*
+		 *  Move the timer to 'expiring' for the duration of the callback.
+		 *  Mark a one-shot timer deleted, compute a new target for an interval.
+		 */
+
+		memcpy((void *) &timer_expiring, (void *) t, sizeof(ev_timer));
+		memset((void *) t, 0, sizeof(ev_timer));
+		timer_count--;
+		t = &timer_expiring;
+
+		if (t->oneshot) {
+			t->removed = 1;
+		} else {
+			t->target = now + t->delay;  /* XXX: or t->target + t->delay? */
+		}
+
+		/*
+		 *  Call timer callback.  The callback can operate on the timer list:
+		 *  add new timers, remove timers.  The callback can even remove the
+		 *  expired timer whose callback we're calling.  However, because the
+		 *  timer being expired has been moved to 'timer_expiring', we don't
+		 *  need to worry about the timer's offset changing on the timer list.
+		 */
+
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+		fprintf(stderr, "calling user callback for timer id %d\n", (int) t->id);
+		fflush(stderr);
 #endif
 
+		duk_push_number(ctx, (double) t->id);
+		duk_get_prop(ctx, -2);  /* -> [ ... stash eventTimers func ] */
+		rc = duk_pcall(ctx, 0 /*nargs*/);  /* -> [ ... stash eventTimers retval ] */
+		if (rc != 0) {
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+			fprintf(stderr, "timer callback failed for timer %d: %s\n", (int) t->id, duk_to_string(ctx, -1));
+			fflush(stderr);
+#endif
+		}
+		duk_pop(ctx);    /* ignore errors for now -> [ ... stash eventTimers ] */
 
-
-static int _helper_get_stack_raw(duk_context* ctx, void*);
-static void _helper_add_dollar_prefix(duk_context* ctx, int idx);
-static void _helper_unpack_timeobj(duk_context* ctx, struct tm* ts, int idx);
-static void _helper_pack_timeobj(duk_context* ctx, struct tm* ts, int idx);
-static int _helper_path_normpath(duk_context* ctx, char* s, int len);
-
-static int _strobj_encode(duk_context* ctx);
-static int _strobj_decode(duk_context* ctx);
-static int _fileobj_close(duk_context* ctx);
-static int _fileobj_read(duk_context* ctx);
-static int _fileobj_write(duk_context* ctx);
-static int _statobj_tostring(duk_context* ctx);
-static int _timeobj_tostring(duk_context* ctx);
-
-static int _ord(duk_context* ctx);
-static int _chr(duk_context* ctx);
-static int _hex(duk_context* ctx);
-static int _dir(duk_context* ctx);
-static int _globals(duk_context* ctx);
-static int _include(duk_context* ctx);
-static int _deepcopy1(duk_context* ctx);
-
-static int _fs_open(duk_context* ctx);
-static int _fs_file_put_content(duk_context* ctx);
-static int _fs_file_get_content(duk_context* ctx);
-
-static int _os_getcwd(duk_context* ctx);
-static int _ospath_isdir(duk_context* ctx);
-static int _ospath_isfile(duk_context* ctx);
-static int _ospath_exists(duk_context* ctx);
-static int _ospath_join(duk_context* ctx);
-static int _ospath_dirname(duk_context* ctx);
-static int _ospath_split(duk_context* ctx);
-static int _ospath_splitext(duk_context* ctx);
-static int _ospath_normpath(duk_context* ctx);
-static int _ospath_abspath(duk_context* ctx);
-
-static int _time_time(duk_context* ctx);
-static int _time_localtime(duk_context* ctx);
-static int _time_gmtime(duk_context* ctx);
-static int _time_asctime(duk_context* ctx);
-static int _time_ctime(duk_context* ctx);
-static int _time_strftime(duk_context* ctx);
-
-static void _dukopen_buildin_extend(duk_context* ctx);
-static void _push_traces_obj(duk_context* ctx);
-static void _push_fs_obj(duk_context* ctx);
-static void _push_os_path_obj(duk_context* ctx);
-static void _push_os_obj(duk_context* ctx);
-static void _push_time_obj(duk_context* ctx);
-static void _push_sys_obj(duk_context* ctx);
-static void _push_subprocess_obj(duk_context* ctx);
-static void _set_modsearch(duk_context* ctx);
-
-//#define duk_alloc_raw(c, size)        malloc(size)
-//#define duk_realloc_raw(c, p, size)   realloc(p, size)
-//#define duk_free_raw(c, p)            free(p)
-
-////////////////////////////////////////////////////////////
-int _helper_get_stack_raw(duk_context* ctx, void*) 
-{
-    const char* s;
-    const char fmt[] = "ExceptionError: \"%s\"\n";
-    char* p;
-
-    ////////////////////////////////////////////////////////
-    //'throw "string"' Exception
-    if (duk_is_string(ctx, -1)) {
-        s = duk_get_string(ctx, -1);
-        p = (char*)duk_alloc_raw(ctx, sizeof(fmt) + strlen(s) + 1);
-        sprintf(p, fmt, s);
-        duk_pop(ctx);
-        duk_push_lstring(ctx, p, strlen(p));
-        duk_free_raw(ctx, p);
-        return 1;
-    }
-
-    ////////////////////////////////////////////////////////
-    //Other exception is object, and object have property named "stack"
-	if (!duk_is_object(ctx, -1)) {
-		return 1;
-	}
-	if (!duk_has_prop_string(ctx, -1, "stack")) {
-		return 1;
+		if (t->removed) {
+			/* One-shot timer (always removed) or removed by user callback. */
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+			fprintf(stderr, "deleting callback state for timer %d\n", (int) t->id);
+			fflush(stderr);
+#endif
+			duk_push_number(ctx, (double) t->id);
+			duk_del_prop(ctx, -2);
+		} else {
+			/* Interval timer, not removed by user callback.  Queue back to
+			 * timer list and bubble to its final sorted position.
+			 */
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+			fprintf(stderr, "queueing timer %d back into active list\n", (int) t->id);
+			fflush(stderr);
+#endif
+			if (timer_count >= MAX_TIMERS) {
+				(void) duk_error(ctx, DUK_ERR_RANGE_ERROR, "out of timer slots");
+			}
+			memcpy((void *) (timer_list + timer_count), (void *) t, sizeof(ev_timer));
+			timer_count++;
+			bubble_last_timer();
+		}
 	}
 
-    //...|object|
+	memset((void *) &timer_expiring, 0, sizeof(ev_timer));
 
-	duk_get_prop_string(ctx, -1, "stack");  /* caller coerces */
-    //...|object|message|
+	duk_pop_2(ctx);  /* -> [ ... ] */
+}
 
-	duk_remove(ctx, -2);//delete object
-    //...|message|
+static void compact_poll_list(void) {
+	int i, j, n;
 
+	/* i = input index
+	 * j = output index (initially same as i)
+	 */
+
+	n = poll_count;
+	for (i = 0, j = 0; i < n; i++) {
+		struct pollfd *pfd = poll_list + i;
+		if (pfd->fd == 0) {
+			/* keep output index the same */
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+			fprintf(stderr, "remove pollfd (index %d): fd=%d, events=%d, revents=%d\n",
+			        i, pfd->fd, pfd->events, pfd->revents),
+			fflush(stderr);
+#endif
+
+			continue;
+		}
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+		fprintf(stderr, "keep pollfd (index %d -> %d): fd=%d, events=%d, revents=%d\n",
+		        i, j, pfd->fd, pfd->events, pfd->revents),
+		fflush(stderr);
+#endif
+		if (i != j) {
+			/* copy only if indices have diverged */
+			memcpy((void *) (poll_list + j), (void *) (poll_list + i), sizeof(struct pollfd));
+		}
+		j++;
+	}
+
+	if (j < poll_count) {
+		/* zeroize unused entries for sanity */
+		memset((void *) (poll_list + j), 0, (poll_count - j) * sizeof(struct pollfd));
+	}
+
+	poll_count = j;
+}
+
+duk_ret_t eventloop_run(duk_context *ctx, void *udata) {
+	ev_timer *t;
+	double now;
+	double diff;
+	int timeout;
+	int rc;
+	int i, n;
+	int idx_eventloop;
+	int idx_fd_handler;
+
+	(void) udata;
+
+	/* The ECMAScript poll handler is passed through EventLoop.fdPollHandler
+	 * which c_eventloop.js sets before we come here.
+	 */
+	duk_push_global_object(ctx);
+	duk_get_prop_string(ctx, -1, "EventLoop");
+	duk_get_prop_string(ctx, -1, "fdPollHandler");  /* -> [ global EventLoop fdPollHandler ] */
+	idx_fd_handler = duk_get_top_index(ctx);
+	idx_eventloop = idx_fd_handler - 1;
+
+	for (;;) {
+		/*
+		 *  Expire timers.
+		 */
+
+		expire_timers(ctx);
+
+		/*
+		 *  If exit requested, bail out as fast as possible.
+		 */
+
+		if (exit_requested) {
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+			fprintf(stderr, "exit requested, exiting event loop\n");
+			fflush(stderr);
+#endif
+			break;
+		}
+
+		/*
+		 *  Compact poll list by removing pollfds with fd == 0.
+		 */
+
+		compact_poll_list();
+
+		/*
+		 *  Determine poll() timeout (as close to poll() as possible as
+		 *  the wait is relative).
+		 */
+
+		now = get_now();
+		t = find_nearest_timer();
+		if (t) {
+			diff = t->target - now;
+			if (diff < MIN_WAIT) {
+				diff = MIN_WAIT;
+			} else if (diff > MAX_WAIT) {
+				diff = MAX_WAIT;
+			}
+			timeout = (int) diff;  /* clamping ensures that fits */
+		} else {
+			if (poll_count == 0) {
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+				fprintf(stderr, "no timers and no sockets to poll, exiting\n");
+				fflush(stderr);
+#endif
+				break;
+			}
+			timeout = (int) MAX_WAIT;
+		}
+
+		/*
+		 *  Poll for activity or timeout.
+		 */
+
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+		fprintf(stderr, "going to poll, timeout %d ms, pollfd count %d\n", timeout, poll_count);
+		fflush(stderr);
+#endif
+
+		rc = poll(poll_list, poll_count, timeout);
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+		fprintf(stderr, "poll rc: %d\n", rc);
+		fflush(stderr);
+#endif
+		if (rc < 0) {
+			/* error */
+		} else if (rc == 0) {
+			/* timeout */
+		} else {
+			/* 'rc' fds active */
+		}
+
+		/*
+		 *  Check socket activity, handle all sockets.  Handling is offloaded to
+		 *  ECMAScript code (fd + revents).
+		 *
+		 *  If FDs are removed from the poll list while we're processing callbacks,
+		 *  the entries are simply marked unused (fd set to 0) without actually
+		 *  removing them from the poll list.  This ensures indices are not
+		 *  disturbed.  The poll list is compacted before next poll().
+		 */
+
+		n = (rc == 0 ? 0 : poll_count);  /* if timeout, no need to check pollfd */
+		for (i = 0; i < n; i++) {
+			struct pollfd *pfd = poll_list + i;
+
+			if (pfd->fd == 0) {
+				/* deleted, perhaps by previous callback */
+				continue;
+			}
+
+			if (pfd->revents) {
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+				fprintf(stderr, "fd %d has revents: %d\n", (int) pfd->fd, (int) pfd->revents);
+				fflush(stderr);
+#endif
+				duk_dup(ctx, idx_fd_handler);
+				duk_dup(ctx, idx_eventloop);
+				duk_push_int(ctx, pfd->fd);
+				duk_push_int(ctx, pfd->revents);
+				rc = duk_pcall_method(ctx, 2 /*nargs*/);
+				if (rc) {
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+					fprintf(stderr, "fd callback failed for fd %d: %s\n", (int) pfd->fd, duk_to_string(ctx, -1));
+					fflush(stderr);
+#endif
+				}
+				duk_pop(ctx);
+
+				pfd->revents = 0;
+			}
+
+		}
+	}
+
+	duk_pop_n(ctx, 3);
+
+	return 0;
+}
+
+static int create_timer(duk_context *ctx) {
+	double delay;
+	int oneshot;
+	int idx;
+	int64_t timer_id;
+	double now;
+	ev_timer *t;
+
+	now = get_now();
+
+	/* indexes:
+	 *   0 = function (callback)
+	 *   1 = delay
+	 *   2 = boolean: oneshot
+	 */
+
+	delay = duk_require_number(ctx, 1);
+	if (delay < MIN_DELAY) {
+		delay = MIN_DELAY;
+	}
+	oneshot = duk_require_boolean(ctx, 2);
+
+	if (timer_count >= MAX_TIMERS) {
+		(void) duk_error(ctx, DUK_ERR_RANGE_ERROR, "out of timer slots");
+	}
+	idx = timer_count++;
+	timer_id = timer_next_id++;
+	t = timer_list + idx;
+
+	memset((void *) t, 0, sizeof(ev_timer));
+	t->id = timer_id;
+	t->target = now + delay;
+	t->delay = delay;
+	t->oneshot = oneshot;
+	t->removed = 0;
+
+	/* Timer is now at the last position; use swaps to "bubble" it to its
+	 * correct sorted position.
+	 */
+
+	bubble_last_timer();
+
+	/* Finally, register the callback to the global stash 'eventTimers' object. */
+
+	duk_push_global_stash(ctx);
+	duk_get_prop_string(ctx, -1, TIMERS_SLOT_NAME);  /* -> [ func delay oneshot stash eventTimers ] */
+	duk_push_number(ctx, (double) timer_id);
+	duk_dup(ctx, 0);
+	duk_put_prop(ctx, -3);  /* eventTimers[timer_id] = callback */
+
+	/* Return timer id. */
+
+	duk_push_number(ctx, (double) timer_id);
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+	fprintf(stderr, "created timer id: %d\n", (int) timer_id);
+	fflush(stderr);
+#endif
 	return 1;
 }
 
-void _helper_add_dollar_prefix(duk_context* ctx, int idx)
-{
-    const char* k;
-    char* newk;
-    duk_size_t n;
+static int delete_timer(duk_context *ctx) {
+	int i, n;
+	int64_t timer_id;
+	ev_timer *t;
+	int found = 0;
 
-    if (idx < 0) {
-        idx = duk_get_top(ctx) + idx;
-    }
+	/* indexes:
+	 *   0 = timer id
+	 */
 
-    k = duk_get_lstring(ctx, idx, &n);
-    newk = (char*)duk_alloc_raw(ctx, n + 1);
-    memset(newk, 0, n + 1);
-    newk[0] = '$';
-    memcpy(&newk[1], k, n);
-    duk_push_lstring(ctx, newk, n + 1);
-    duk_free_raw(ctx, newk);
+	timer_id = (int64_t) duk_require_number(ctx, 0);
 
-    duk_replace(ctx, idx);
-}
+	/*
+	 *  Unlike insertion, deletion needs a full scan of the timer list
+	 *  and an expensive remove.  If no match is found, nothing is deleted.
+	 *  Caller gets a boolean return code indicating match.
+	 *
+	 *  When a timer is being expired and its user callback is running,
+	 *  the timer has been moved to 'timer_expiring' and its deletion
+	 *  needs special handling: just mark it to-be-deleted and let the
+	 *  expiry code remove it.
+	 */
 
-
-void _helper_unpack_timeobj(duk_context* ctx, struct tm* ts, int idx)
-{
-    duk_get_prop_string(ctx, idx, "tm_year");
-    ts->tm_year = duk_to_int(ctx, -1) - 1900;
-    duk_pop(ctx);
-
-    duk_get_prop_string(ctx, idx, "tm_mon");
-    ts->tm_mon = duk_to_int(ctx, -1) - 1;
-    duk_pop(ctx);
-
-    duk_get_prop_string(ctx, idx, "tm_mday");
-    ts->tm_mday = duk_to_int(ctx, -1);
-    duk_pop(ctx);
-
-    duk_get_prop_string(ctx, idx, "tm_hour");
-    ts->tm_hour = duk_to_int(ctx, -1);
-    duk_pop(ctx);
-
-    duk_get_prop_string(ctx, idx, "tm_min");
-    ts->tm_min = duk_to_int(ctx, -1);
-    duk_pop(ctx);
-
-    duk_get_prop_string(ctx, idx, "tm_sec");
-    ts->tm_sec = duk_to_int(ctx, -1);
-    duk_pop(ctx);
-
-    duk_get_prop_string(ctx, idx, "tm_wday");
-    ts->tm_wday = duk_to_int(ctx, -1);
-    duk_pop(ctx);
-
-    duk_get_prop_string(ctx, idx, "tm_yday");
-    ts->tm_yday = duk_to_int(ctx, -1) - 1;
-    duk_pop(ctx);
-
-    duk_get_prop_string(ctx, idx, "tm_isdst");
-    ts->tm_isdst = duk_to_int(ctx, -1);
-    duk_pop(ctx);
-}
-
-void _helper_pack_timeobj(duk_context* ctx, struct tm* ts, int idx)
-{
-    duk_push_int(ctx, ts->tm_year + 1900);
-    duk_put_prop_string(ctx, idx-1, "tm_year");
-
-    duk_push_int(ctx, ts->tm_mon + 1);
-    duk_put_prop_string(ctx, idx-1, "tm_mon");
-
-    duk_push_int(ctx, ts->tm_mday);
-    duk_put_prop_string(ctx, idx-1, "tm_mday");
-
-    duk_push_int(ctx, ts->tm_hour);
-    duk_put_prop_string(ctx, idx-1, "tm_hour");
-
-    duk_push_int(ctx, ts->tm_min);
-    duk_put_prop_string(ctx, idx-1, "tm_min");
-    
-    duk_push_int(ctx, ts->tm_sec);
-    duk_put_prop_string(ctx, idx-1, "tm_sec");
-
-    duk_push_int(ctx, ts->tm_wday);
-    duk_put_prop_string(ctx, idx-1, "tm_wday");
-
-    duk_push_int(ctx, ts->tm_yday + 1);
-    duk_put_prop_string(ctx, idx-1, "tm_yday");
-
-    duk_push_int(ctx, ts->tm_isdst);
-    duk_put_prop_string(ctx, idx-1, "tm_isdst");
-}
-
-//@param s      no mater with or without '\0'
-//@param len    length not included '\0'
-int _helper_path_normpath(duk_context* ctx, char* s, int len)
-{
-    char** stack;
-    int max_depth = 128;
-    int depth = 0;
-    char* p;
-    char* prev;
-    char* pend;
-    int n;
-    int i;
-    int j;
-#ifdef DUK_F_WINDOWS
-    const char split_char = '\\';
+	t = &timer_expiring;
+	if (t->id == timer_id) {
+		t->removed = 1;
+		duk_push_true(ctx);
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+		fprintf(stderr, "deleted expiring timer id: %d\n", (int) timer_id);
+		fflush(stderr);
 #endif
-#ifdef DUK_F_LINUX
-    const char split_char = '/';
+		return 1;
+	}
+
+	n = timer_count;
+	for (i = 0; i < n; i++) {
+		t = timer_list + i;
+		if (t->id == timer_id) {
+			found = 1;
+
+			/* Shift elements downwards to keep the timer list dense
+			 * (no need if last element).
+			 */
+			if (i < timer_count - 1) {
+				memmove((void *) t, (void *) (t + 1), (timer_count - i - 1) * sizeof(ev_timer));
+			}
+
+			/* Zero last element for clarity. */
+			memset((void *) (timer_list + n - 1), 0, sizeof(ev_timer));
+
+			/* Update timer_count. */
+			timer_count--;
+
+			/* The C state is now up-to-date, but we still need to delete
+			 * the timer callback state from the global 'stash'.
+			 */
+
+			duk_push_global_stash(ctx);
+			duk_get_prop_string(ctx, -1, TIMERS_SLOT_NAME);  /* -> [ timer_id stash eventTimers ] */
+			duk_push_number(ctx, (double) timer_id);
+			duk_del_prop(ctx, -2);  /* delete eventTimers[timer_id] */
+
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+			fprintf(stderr, "deleted timer id: %d\n", (int) timer_id);
+			fflush(stderr);
+#endif
+			break;
+		}
+	}
+
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+	if (!found) {
+		fprintf(stderr, "trying to delete timer id %d, but not found; ignoring\n", (int) timer_id);
+		fflush(stderr);
+	}
 #endif
 
-    stack = (char**)duk_alloc_raw(ctx, sizeof(char*) * max_depth);
-
-    prev    = s;
-    pend    = s + len;
-    p       = prev;
-    while (p < pend) {
-        if (depth == max_depth - 1) {
-            max_depth *= 2;
-            stack = (char**)duk_realloc_raw(ctx, stack, sizeof(char*) * max_depth);
-        }
-
-        if ((*p == '/') || (*p == '\\')) {
-            if (prev < p) {
-                n = p-prev;
-                stack[depth] = (char*)duk_alloc_raw(ctx, n+1);
-                memset(stack[depth], 0, n+1);
-                memcpy(stack[depth], prev, n);
-                depth++;
-                prev = p+1;
-                p = prev;
-            } else {
-                p++;
-            }
-        } else {
-            p++;
-        }
-    }
-    if (prev < p) {
-        n = p-prev;
-        stack[depth] = (char*)duk_alloc_raw(ctx, n+1);
-        memset(stack[depth], 0, n+1);
-        memcpy(stack[depth], prev, n);
-        depth++;
-    }
-
-    i = 0;
-    while (i < depth) {
-        if (strcmp(stack[i], "..") == 0) {
-            if (i > 0) {
-                duk_free_raw(ctx, stack[i-1]);
-                duk_free_raw(ctx, stack[i]);
-                for (j = i+1;j < depth;j++) {
-                    stack[j-2] = stack[j];
-                }
-                depth = depth-2;
-                i--;
-            } else {
-                duk_free_raw(ctx, stack[i]);
-                for (j = i+1;j < depth;j++) {
-                    stack[j-1] = stack[j];
-                }
-                depth = depth-1;
-            }
-
-        } else if (strcmp(stack[i], ".") == 0) {
-            duk_free_raw(ctx, stack[i]);
-            for (j = i+1;j < depth;j++) {
-                stack[j-1] = stack[j];
-            }
-            depth = depth-1;
-
-        } else {
-            i++;
-        }
-    }
-
-    p = s;
-    for (i = 0;i < depth;i++) {
-        n = strlen(stack[i]);
-        memcpy(p, stack[i], n);
-        p += n;
-        
-        if (i < depth - 1) {
-            *p++ = split_char;
-        }
-
-        duk_free_raw(ctx, stack[i]);
-    }
-    //when s not end with '\0',
-    //still need to add '\0',
-    //to prevent user just puts(s),
-    //this will overflow!
-    if (p < pend) {
-        *p = '\0';
-    }
-    duk_free_raw(ctx, stack);
-
-    return p - s;
+	duk_push_boolean(ctx, found);
+	return 1;
 }
 
-
-// obj.close();
-int _fileobj_close(duk_context* ctx)
-{
-    FILE* fp;
-
-    //check parameters
-    duk_push_this(ctx);
-    duk_get_prop_string(ctx, -1, "__handler__");
-    fp = (FILE *) duk_get_pointer(ctx, -1);
-    duk_pop(ctx);
-
-    if (fp == NULL) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "fp of fclose(fp) is NULL!");
-    }
-
-    //close
-    fclose(fp);
-
-    return 0;
-}
-
-// obj.read(size);  --max read size
-// obj.read();      --read all bytes
-int _fileobj_read(duk_context* ctx)
-{
-    FILE* fp;
-    unsigned char* rawbuf;
-    unsigned char* dukbuf;
-    unsigned long len;
-    unsigned long pos;
-    unsigned long fsize;
-    unsigned long bytes_read;
-
-    //check parameters
-    if ((duk_get_top(ctx) == 1) && !duk_is_number(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "size must be interger");
-        len = duk_to_uint32(ctx, 0);
-    } else {
-        len = 0;
-    }
-
-    duk_push_this(ctx);
-    duk_get_prop_string(ctx, -1, "__handler__");
-    fp = (FILE *) duk_get_pointer(ctx, -1);
-    duk_pop(ctx);
-
-    if (fp == NULL) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "fp of fclose(fp) is NULL!");
-    }
-
-    //actual read
-    pos = ftell(fp);
-    fseek(fp, 0, SEEK_END);
-    fsize = ftell(fp);
-    fseek(fp, pos, SEEK_SET);
-
-    if ((len == 0) || (len > fsize - pos)) {
-        len = fsize - pos;
-    }
-
-    //fixed bug:
-    //  when fopen(fn, "r"), fread will convert "\r\n" to "\n",
-    //  but fseek not check this!
-    //  so we need to load this temporary then push to duktape.
-    rawbuf = (unsigned char*)duk_alloc_raw(ctx, len);
-    bytes_read = fread(rawbuf, sizeof(unsigned char), len, fp);
-
-    dukbuf = (unsigned char*)duk_push_fixed_buffer(ctx, bytes_read);
-    memcpy(dukbuf, rawbuf, bytes_read);
-    duk_free_raw(ctx, rawbuf);
-
-    return 1;
-}
-
-
-// obj.write(buffer);
-// obj.write(string);
-int _fileobj_write(duk_context* ctx)
-{
-    FILE* fp;
-    unsigned char* buf;
-    size_t len;
-    unsigned long bytes_wrote;
-
-    //check parameters
-    if (duk_get_top(ctx) != 1) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "missing buffer or string to write");
-    }
-
-    if (!duk_is_buffer(ctx, 0) && !duk_is_string(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "just buffer or string accept");
-    }
-
-    duk_push_this(ctx);
-    duk_get_prop_string(ctx, -1, "__handler__");
-    fp = (FILE *) duk_get_pointer(ctx, -1);
-    duk_pop(ctx);
-
-    if (fp == NULL) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "fp of fclose(fp) is NULL!");
-    }
-
-    if (duk_is_buffer(ctx, 0)) {
-        buf = (unsigned char*)duk_get_buffer(ctx, 0, &len);
-    } else {//buf is NOT 'NUL-Terminated'!
-        buf = (unsigned char*)duk_get_lstring(ctx, 0, &len);
-    }
-
-    if ((len <= 0) || (buf == NULL)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "invalid buffer or string!");
-    }
-
-    bytes_wrote = fwrite(buf, sizeof(char), len, fp);
-    duk_push_int(ctx, bytes_wrote);
-
-    return 1;
-}
-
-int _timeobj_tostring(duk_context* ctx)
-{
-    struct tm ts;
-    char buf[100];
-
-    duk_push_this(ctx);
-    _helper_unpack_timeobj(ctx, &ts, -1);
-    duk_pop(ctx);
-
-    sprintf(buf,
-            "time.struct_time(tm_year=%d, tm_mon=%d, tm_mday=%d, "
-            "tm_hour=%d, tm_min=%d, tm_sec=%d, tm_wday=%d, "
-            "tm_yday=%d, tm_isdst=%d)",
-            ts.tm_year + 1900, ts.tm_mon + 1, ts.tm_mday,
-            ts.tm_hour, ts.tm_min, ts.tm_sec, ts.tm_wday,
-            ts.tm_yday, ts.tm_isdst);
-
-    duk_push_string(ctx, buf);
-
-    return 1;
-}
-
-static int _psobj_stdin_write(duk_context* ctx)
-{
-    int f;
-    const char* buf;
-    duk_size_t size;
-    int nr_bytes;
-
-    if (duk_get_top(ctx) != 1) {
-        duk_error(ctx, DUK_ERR_RANGE_ERROR, "accept one argument only");
-    }
-    if (!duk_is_string(ctx, 0) && !duk_is_buffer(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_RANGE_ERROR, "need string or buffer");
-    }
-
-    if (duk_is_string(ctx, 0)) {
-        buf = duk_get_lstring(ctx, 0, &size);
-    } else {
-        buf = (const char *) duk_get_buffer(ctx, 0, &size);
-    }
-
-    duk_push_this(ctx);
-    duk_get_prop_string(ctx, -1, "__handler__");
-    f = (intptr_t) duk_get_pointer(ctx, -1);
-    duk_pop(ctx);
-
-    nr_bytes = write(f, buf, size);
-    if (nr_bytes != size) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "native write fail");
-    }
-
-    duk_push_int(ctx, nr_bytes);
-
-    return 1;
-}
-
-static int _psobj_stdout_read(duk_context* ctx)
-{
-    char* buf = NULL;
-    int size = 0;
-    int nr_bytes;
-    int f;
-
-    if ((duk_get_top(ctx) != 0) && duk_is_number(ctx, 0)) {
-        size = duk_get_int(ctx, 0);
-    }
-
-    if (size <= 0) {
-        size = 1024;
-    }
-
-    duk_push_this(ctx);
-    duk_get_prop_string(ctx, -1, "__handler__");
-    f = (intptr_t )duk_get_pointer(ctx, -1);
-    duk_pop(ctx);
-
-    buf = (char *) duk_alloc_raw(ctx, size);
-    nr_bytes = read(f, buf, size);
-    if (nr_bytes < 0) {
-        duk_free(ctx, buf);
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "native read fail");
-    }
-
-    if (nr_bytes == 0) {
-        duk_free(ctx, buf);
-        duk_push_null(ctx);
-        return 1;
-    }
-
-    duk_push_lstring(ctx, buf, nr_bytes);
-    duk_free(ctx, buf);
-
-    return 1;
-}
-
-static int _psobj_wait(duk_context* ctx)
-{
-    subprocess_t* ps;
-    int returncode;
-
-    duk_push_this(ctx);
-
-    duk_get_prop_string(ctx, -1, "__handler__");
-    if (duk_is_undefined(ctx, -1)) {
-        ps = NULL;
-    } else {
-        ps = (subprocess_t*)duk_get_pointer(ctx, -1);
-    }
-    duk_pop(ctx);
-
-    if (ps == NULL) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "missing '__handler__'!");
-    }
-
-    returncode = pswait(ps);
-
-    duk_push_int(ctx, returncode);
-    duk_put_prop_string(ctx, -2, "returncode");
-
-    duk_push_int(ctx, returncode);
-    return 1;
-}
-
-static int _psobj_close(duk_context* ctx)
-{
-    subprocess_t* ps;
-
-    duk_push_this(ctx);
-
-    duk_get_prop_string(ctx, -1, "__handler__");
-    if (duk_is_undefined(ctx, -1)) {
-        ps = NULL;
-    } else {
-        ps = (subprocess_t*)duk_get_pointer(ctx, -1);
-    }
-    duk_pop(ctx);
-
-    if (ps == NULL) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "missing '__handler__'!");
-    }
-
-    psclose(ps);
-
-    duk_push_undefined(ctx);
-    duk_put_prop_string(ctx, -2, "__handler__");
-
-    return 0;
-}
-
-static int _psobj_finalizer(duk_context* ctx)
-{
-    subprocess_t* ps;
-
-    duk_get_prop_string(ctx, -1, "__handler__");
-    if (!duk_is_undefined(ctx, -1)) {
-        ps = (subprocess_t*)duk_get_pointer(ctx, -1);
-        psclose(ps);
-    }
-    duk_pop(ctx);
-
-    return 0;
-}
-
-
-int _ord(duk_context* ctx)
-{
-    const char* s;
-
-    if (duk_get_top(ctx) != 1) {
-        duk_error(ctx, DUK_ERR_RANGE_ERROR, "just accept one argument!");
-    }
-    if (duk_get_type(ctx, -1) != DUK_TYPE_STRING) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "string only!");
-    }
-
-    s = duk_get_string(ctx, 0);
-    if (strlen(s) == 0) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "null string not allow!");
-    }
-
-    duk_push_int(ctx, *s);
-
-    return 1;
-}
-
-int _chr(duk_context* ctx)
-{
-    int v;
-    char s[2];
-
-    if (duk_get_top(ctx) != 1) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "one argument only!");
-    }
-    if (duk_get_type(ctx, -1) != DUK_TYPE_NUMBER) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "number only!");
-    }
-
-    v = duk_get_int(ctx, 0);
-    s[0] = (char)v;
-    s[1] = '\0';
-    duk_push_string(ctx, s);
-
-    return 1;
-}
-
-int _hex(duk_context* ctx)
-{
-    int v;
-    char s[20];
-
-    if (duk_get_top(ctx) != 1) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "one argument only!");
-    }
-    if (duk_get_type(ctx, -1) != DUK_TYPE_NUMBER) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "number only!");
-    }
-
-    v = duk_get_int(ctx, 0);
-    sprintf(s, "0x%08x", v);
-    duk_push_string(ctx, s);
-
-    return 1;
-}
-
-//dir(obj)      DUK_ENUM_OWN_PROPERTIES_ONLY
-//dir(obj, 1)   DUK_ENUM_INCLUDE_INTERNAL
-//dir(obj, 2)   DUK_ENUM_INCLUDE_INTERNAL|DUK_ENUM_INCLUDE_NONENUMERABLE;
-//
-int _dir(duk_context* ctx)
-{
-    int depth;
-    int obj_id = 0;
-    int enum_level = 0;
-    duk_uint_t enum_flags;
-
-    depth = duk_get_top(ctx);
-    if (depth == 0) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "need one object!");
-    }
-    if (duk_get_type(ctx, 0) != DUK_TYPE_OBJECT) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "just accept object!");
-    }
-
-    if (depth == 2) {
-        enum_level = duk_get_int(ctx, 1);
-    }
-
-    if (enum_level == 1) {
-        enum_flags = 0;
-    } else if (enum_level == 2) {
-        enum_flags = 0;
-    } else {
-        enum_flags = 0;
-    }
-
-    obj_id = duk_push_array(ctx);
-    duk_enum(ctx, 0, enum_flags);
-
-    // [o] [array] [enum]
-    while (duk_next(ctx, -1/*enumid*/, 1/*get value*/)) {
-        // [o] [array] [enum] key value
-        _helper_add_dollar_prefix(ctx, -2);
-        duk_put_prop(ctx, obj_id);
-    }
-
-    duk_pop(ctx);//pop [enum]
-
-    return 1;
-}
-
-int _globals(duk_context* ctx)
-{
-    int depth = 0;
-
-    depth = duk_get_top(ctx);
-    if (depth > 0) {
-        duk_pop_n(ctx, depth);
-    }
-
-    duk_push_global_object(ctx);
-    if (depth > 0) {
-        duk_push_int(ctx, 2);
-    }
-    _dir(ctx);
-
-    return 1;
-}
-
-int _include(duk_context* ctx)
-{
-    const char* fn;
-    duk_size_t n;
-
-    if (duk_get_top(ctx) != 1) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "need stript file name");
-    }
-    if (!duk_is_string(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "only accept string");
-    }
-    fn = duk_get_lstring(ctx, 0, &n);
-    if (n <= 0) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "string is empty");
-    }
-
-    ////////////////////////////////////////////////////////
-    //push '__file__' to 'traces'
-    duk_push_global_object(ctx);
-    duk_get_prop_string(ctx, -1, "__file__");
-
-    duk_get_prop_string(ctx, -2, "Modules");
-    duk_get_prop_string(ctx, -1, "traces");
-    duk_remove(ctx, -2);
-
-    if (duk_is_undefined(ctx, -1)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "can't find 'traces'");
-    }
-    duk_push_string(ctx, "push");
-    duk_dup(ctx, -3);
-    duk_call_prop(ctx, -3, 1);
-    duk_pop(ctx);
-
-    //cleanup stack
-    duk_pop(ctx);//pop 'traces'
-    duk_remove(ctx, -2);//pop [global]
-
-    ////////////////////////////////////////////////////////
-    //stack: fn,__file__
-    fn = duk_get_lstring(ctx, 0, &n);
-    if ((n >= 2) && (fn[0] == '.') && ((fn[1] == '/') || (fn[1] == '\\'))) {
-        duk_pop(ctx);
-
-    } else if (duk_is_undefined(ctx, 1)) {
-        duk_pop(ctx);
-
-    } else {
-        //tryfn = os.path.join(os.path.dirname(__file__), fn);
-        //if os.path.exist(tryfn):
-        //    fn = tryfn
-        duk_push_c_function(ctx, _ospath_dirname, 1);
-        duk_dup(ctx, -2);
-        duk_call(ctx, 1);
-        duk_remove(ctx, -2);
-
-        duk_push_c_function(ctx, _ospath_join, 2);
-        duk_dup(ctx, -2);
-        duk_dup(ctx, -4);
-        duk_call(ctx, 2);
-        duk_remove(ctx, -2);
-
-        duk_push_c_function(ctx, _ospath_exists, 1);
-        duk_dup(ctx, -2);
-        duk_call(ctx, 1);
-        if (duk_get_boolean(ctx, -1)) {
-            duk_pop(ctx);//pop result
-            duk_remove(ctx, -2);//pop original string
-        } else {
-            duk_pop(ctx);//pop result
-            duk_pop(ctx);//pop __file__
-        }
-    }
-
-    ////////////////////////////////////////////////////////
-    //stack: fn
-    duk_push_c_function(ctx, _ospath_abspath, 1);
-    duk_dup(ctx, -2);
-    duk_call(ctx, 1);
-    duk_remove(ctx, -2);
-
-    //update '__file__'
-    duk_push_global_object(ctx);
-    duk_dup(ctx, -2);
-    duk_put_prop_string(ctx, -2, "__file__");
-    duk_pop(ctx);
-
-
-    fn = duk_get_string(ctx, 0);
-    if (duk_peval_file(ctx, fn) != 0) {
-        duk_throw(ctx);
-    }
-    duk_remove(ctx, 0);//pop fn
-    duk_gc(ctx, 0);
-
-    ////////////////////////////////////////////////////////
-    //restore '__file__'
-    duk_push_global_object(ctx);
-
-    duk_get_prop_string(ctx, -1, "Modules");
-    duk_get_prop_string(ctx, -1, "traces");
-    duk_remove(ctx, -2);
-
-    duk_push_string(ctx, "pop");
-    duk_call_prop(ctx, -2, 0);
-    duk_remove(ctx, -2);//pop 'traces'
-
-    duk_put_prop_string(ctx, -2, "__file__");
-
-    duk_pop(ctx);//pop [global]
-
-    return 1;
-}
-
-//copy method of $0 to $1
-//
-//equal:
-//  var m = dir($0);
-//  for (var k in m) {
-//      $1[k.substring(1)] = m[k];
-//  }
-//
-static int _deepcopy1(duk_context* ctx)
-{
-    int from_id = 0;
-    int to_id = 1;
-
-    if (duk_get_top(ctx) == 0) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "accept 1 arguments at least");
-    }
-    if (duk_get_top(ctx) == 1) {
-        duk_push_object(ctx);
-    }
-
-    duk_enum(ctx, from_id, DUK_ENUM_OWN_PROPERTIES_ONLY);
-
-    while (duk_next(ctx, -1/*enumid*/, 1/*get value*/)) {
-        duk_put_prop(ctx, to_id);
-    }
-
-    duk_pop(ctx);//pop [enum]
-
-    return 1;
-}
-
-// fs.open(fn, mode);
-// fs.open(fn);         --default read mode
-int _fs_open(duk_context* ctx)
-{
-    FILE* fp;
-    const char* fn;
-    const char* mode;
-
-    //check parameters
-    if (duk_get_top(ctx) == 2) {
-        if (!duk_is_string(ctx, 0)) {
-            duk_error(ctx, DUK_ERR_TYPE_ERROR, "file name must be string");
-        }
-        if (!duk_is_string(ctx, 1)) {
-            duk_error(ctx, DUK_ERR_TYPE_ERROR, "file mode must be string");
-        }
-        mode = duk_get_string(ctx, 1);
-
-    } else if (duk_get_top(ctx) == 1) {
-        if (!duk_is_string(ctx, 0)) {
-            duk_error(ctx, DUK_ERR_TYPE_ERROR, "file name must be string");
-        }
-        mode = "r";
-
-    } else {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "missing parameters");
-    }
-
-    duk_dup(ctx, 0);//copy to top(-1)
-    fn = duk_get_string(ctx, -1);
-
-    //open file
-    if ((fp = fopen(fn, mode)) == NULL) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "fopen error.");
-    }
-
-    ////////////////////////////////////////////////////////
-    //generate return object
-    duk_push_object(ctx);
-
-    duk_push_string(ctx, "__cobject_file__");
-    duk_put_prop_string(ctx, -2, "__type__");
-
-    //remember parameters
-    fn = duk_get_string(ctx, 0);
-    duk_push_string(ctx, fn);
-    duk_put_prop_string(ctx, -2, "__file__");
-
-    duk_push_string(ctx, mode);
-    duk_put_prop_string(ctx, -2, "__mode__");
-
-    duk_push_pointer(ctx, fp);
-    duk_put_prop_string(ctx, -2, "__handler__");
-
-    //registers c function
-    gs_put_c_method(ctx, "close", _fileobj_close);
-    gs_put_c_method(ctx, "read",  _fileobj_read);
-    gs_put_c_method(ctx, "write", _fileobj_write);
-
-    return 1;
-}
-
-// file_put_content(fn, data)
-int _fs_file_put_content(duk_context* ctx)
-{
-    FILE* fp;
-    const char* fn;
-    const char* s;
-    size_t len;
-    int bytes_wrote;
-
-    if (!duk_is_string(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "file name must be string");
-    }
-    if (!duk_is_string(ctx, 1) && !duk_is_buffer(ctx, 1)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "file name must be string or buffer");
-    }
-
-    fn = duk_get_string(ctx, 0);
-
-    if (duk_is_string(ctx, 1)) {
-        s = duk_get_lstring(ctx, 1, &len);
-    } else {
-        s = (const char*)duk_get_buffer(ctx, 1, &len);
-    }
-
-    if ((fp = fopen(fn, "wb")) == NULL) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "can't open file");
-    }
-
-    bytes_wrote = fwrite(s, 1, len, fp);
-    fclose(fp);
-    fp = NULL;
-
-    duk_push_int(ctx, bytes_wrote);
-
-    return 1;
-}
-
-// file_get_content(fn)
-int _fs_file_get_content(duk_context* ctx)
-{
-    FILE* fp;
-    const char* fn;
-    int len;
-    char* p = NULL;
-
-    if (!duk_is_string(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "file name must be string");
-    }
-
-    fn = duk_get_string(ctx, 0);
-
-    if ((fp = fopen(fn, "rb")) != NULL) {
-        fseek(fp, 0, SEEK_END);
-        len = ftell(fp);
-        fseek(fp, 0, SEEK_SET);
-
-        p = (char*)duk_alloc_raw(ctx, len + 1);
-        memset(p, 0, len + 1);
-
-        fread(p, 1, len, fp);
-
-        fclose(fp);
-        fp = NULL;
-    }
-
-    if (p != NULL) {
-        duk_push_lstring(ctx, p, len);
-        duk_free_raw(ctx, p);
-    } else {
-        duk_push_null(ctx);
-    }
-
-    return 1;//one string
-}
-
-static int _ps_open(duk_context* ctx)
-{
-    subprocess_t* ps;
-    int length;
-    char** args;
-    int i;
-    const char* s_ptr;
-    duk_size_t s_len;
-
-    if (duk_get_top(ctx) == 0) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "one parameter at least!");
-    }
-
-    if (duk_is_array(ctx, 0)) {
-        duk_get_prop_string(ctx, -1, "length");
-        length = duk_get_int(ctx, -1);
-        if ((duk_is_undefined(ctx, -1)) || (length <= 0)) {
-            duk_error(ctx, DUK_ERR_TYPE_ERROR, "Array.length is zero or invalid!");
-        }
-        duk_pop(ctx);
-
-        args = (char**)duk_alloc_raw(ctx, sizeof(char*) * (length + 1));
-        memset(args, 0, sizeof(char*) * (length + 1));
-
-        for (i = 0;i < length;i++) {
-            duk_get_prop_index(ctx, -1, i);
-            s_ptr = duk_get_lstring(ctx, -1, &s_len);
-            args[i] = (char*)duk_alloc_raw(ctx, sizeof(char) * (s_len + 1));
-            memset(args[i], 0, sizeof(char) * (s_len + 1));
-            memcpy(args[i], s_ptr, s_len);
-            duk_pop(ctx);
-        }
-
-    } else {
-        length = duk_get_top(ctx);
-
-        args = (char**)duk_alloc_raw(ctx, sizeof(char*) * (length + 1));
-        memset(args, 0, sizeof(char*) * (length + 1));
-
-        for (i = 0;i < length;i++) {
-            s_ptr = duk_get_lstring(ctx, i, &s_len);
-            args[i] = (char*)duk_alloc_raw(ctx, sizeof(char) * (s_len + 1));
-            memset(args[i], 0, sizeof(char) * (s_len + 1));
-            memcpy(args[i], s_ptr, s_len);
-            duk_pop(ctx);
-        }
-    }
-
-    duk_set_top(ctx, 0);//clean all parameters
-
-    ps = psopen(args[0], args);
-    if (ps == NULL) {
-        for (i = 0;i < length;i++) {
-            duk_free_raw(ctx, args[i]);
-        }
-        duk_free_raw(ctx, args);
-
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "native psopen fail!");
-    }
-
-    ////////////////////////////////////////////////////////
-    //build return object
-    duk_push_object(ctx);
-
-    duk_push_pointer(ctx, ps);
-    duk_put_prop_string(ctx, -2, "__handler__");
-
-    duk_push_int(ctx, ps->pid);
-    duk_put_prop_string(ctx, -2, "pid");
-
-    duk_push_undefined(ctx);
-    duk_put_prop_string(ctx, -2, "returncode");
-
-    duk_push_object(ctx);
-    duk_push_pointer(ctx, (void*)ps->stdin_fileno);
-    duk_put_prop_string(ctx, -2, "__handler__");
-    gs_put_c_method(ctx, "write", _psobj_stdin_write);
-    duk_put_prop_string(ctx, -2, "stdin");
-
-    duk_push_object(ctx);
-    duk_push_pointer(ctx, (void*)ps->stdout_fileno);
-    duk_put_prop_string(ctx, -2, "__handler__");
-    gs_put_c_method(ctx, "read", _psobj_stdout_read);
-    duk_put_prop_string(ctx, -2, "stdout");
-
-    gs_put_c_method(ctx, "wait", _psobj_wait);
-    gs_put_c_method(ctx, "close", _psobj_close);
-
-    duk_push_c_function(ctx, _psobj_finalizer, 1);
-    duk_set_finalizer(ctx, -2);
-
-    duk_push_array(ctx);
-    for (i = 0;i < length;i++) {
-        duk_push_string(ctx, args[i]);
-        duk_put_prop_index(ctx, -2, i);
-    }
-    duk_put_prop_string(ctx, -2, "cmd");
-
-    for (i = 0;i < length;i++) {
-        duk_free_raw(ctx, args[i]);
-    }
-    duk_free_raw(ctx, args);
-
-    return 1;
-}
-
-int _os_getcwd(duk_context* ctx)
-{
-    char* currdir;
-
-    currdir = getcwd(NULL, 0);
-    if (currdir == NULL) {
-        duk_push_undefined(ctx);
-        return 1;
-    }
-
-    duk_push_string(ctx, currdir);
-
-
-    free(currdir);
-
-    return 1;
-}
-
-int _os_getdatadir(duk_context* ctx)
-{
-    static std::string currdir = GetDataDir().string();
-
-    duk_push_string(ctx, currdir.c_str());
-
-    return 1;
-}
-
-int _os_getmoduledir(duk_context* ctx)
-{
-    static std::string dir = GetModuleDir().string();
-
-    duk_push_string(ctx, dir.c_str());
-
-    return 1;
-}
-
-int _os_getworkspacedir(duk_context* ctx)
-{
-    static std::string dir = GetWorkspaceDir().string();
-
-    duk_push_string(ctx, dir.c_str());
-
-    return 1;
-}
-
-int _ospath_isdir(duk_context* ctx)
-{
-    if (duk_get_top(ctx) == 1) {
-        if (!duk_is_string(ctx, 0)) {
-            duk_error(ctx, DUK_ERR_TYPE_ERROR, "file name must be string");
-        }
-
-    } else {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "missing parameters");
-    }
-
-
-    fs::path p = duk_get_string(ctx, 0);
-    if (!fs::exists(p)) {
-        duk_push_false(ctx);
-        return 1;
-    }
-
-    if (!fs::is_directory(p)) {
-        duk_push_true(ctx);
-    } else {
-        duk_push_false(ctx);
-    }
-
-    return 1;
-}
-
-int _ospath_isfile(duk_context* ctx)
-{
-    if (duk_get_top(ctx) == 1) {
-        if (!duk_is_string(ctx, 0)) {
-            duk_error(ctx, DUK_ERR_TYPE_ERROR, "file name must be string");
-        }
-
-    } else {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "missing parameters");
-    }
-
-    fs::path p = duk_get_string(ctx, 0);
-
-    if (!fs::exists(p)) {
-        duk_push_false(ctx);
-        return 1;
-    }
-
-    if (!fs::is_regular_file(p)) {
-        duk_push_false(ctx);
-    } else {
-        duk_push_true(ctx);
-    }
-
-    return 1;
-}
-
-int _ospath_exists(duk_context* ctx)
-{
-
-
-    if (duk_get_top(ctx) == 1) {
-        if (!duk_is_string(ctx, 0)) {
-            duk_error(ctx, DUK_ERR_TYPE_ERROR, "file name must be string");
-        }
-
-    } else {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "missing parameters");
-    }
-
-
-    fs::path p = duk_get_string(ctx, 0);
-
-    if (!fs::exists(p)) {
-        duk_push_false(ctx);
-    } else {
-        duk_push_true(ctx);
-    }
-
-    return 1;
-}
-
-int _ospath_join(duk_context* ctx)
-{
-    int n;
-    int i;
-    int total_len = 0;
-    duk_size_t s_len;
-    const char* s;
-    char* buf;
-    int len;
-
-#ifdef DUK_F_WINDOWS
-    char split_char = '\\';
+static int listen_fd(duk_context *ctx) {
+	int fd = duk_require_int(ctx, 0);
+	int events = duk_require_int(ctx, 1);
+	int i, n;
+	struct pollfd *pfd;
+
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+	fprintf(stderr, "listen_fd: fd=%d, events=%d\n", fd, events);
+	fflush(stderr);
 #endif
-#ifdef DUK_F_LINUX
-    char split_char = '/';
+	/* events == 0 means stop listening to the FD */
+
+	n = poll_count;
+	for (i = 0; i < n; i++) {
+		pfd = poll_list + i;
+		if (pfd->fd == fd) {
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+			fprintf(stderr, "listen_fd: fd found at index %d\n", i);
+			fflush(stderr);
+#endif
+			if (events == 0) {
+				/* mark to-be-deleted, cleaned up by next poll */
+				pfd->fd = 0;
+			} else {
+				pfd->events = events;
+			}
+			return 0;
+		}
+	}
+
+	/* not found, append to list */
+#if DUKTAPE_EVENTLOOP_DEBUG > 0
+	fprintf(stderr, "listen_fd: fd not found on list, add new entry\n");
+	fflush(stderr);
 #endif
 
-    n = duk_get_top(ctx);
-    for (i = 0;i < n;i++) {
-        duk_get_lstring(ctx, i, &s_len);
-        total_len += s_len + 1;
-    }
+	if (poll_count >= MAX_FDS) {
+		(void) duk_error(ctx, DUK_ERR_ERROR, "out of fd slots");
+	}
 
-    if (total_len <= 0) {
-        duk_push_undefined(ctx);
-        return 1;
-    }
+	pfd = poll_list + poll_count;
+	pfd->fd = fd;
+	pfd->events = events;
+	pfd->revents = 0;
+	poll_count++;
 
-    len = 0;
-    buf = (char*)duk_alloc_raw(ctx, total_len+n+1);
-    memset(buf, 0, total_len+n+1);
-
-    for (i = 0;i < n;i++) {
-        s = duk_get_lstring(ctx, i, &s_len);
-        if (s_len <= 0) {
-            continue;
-        }
-        //first variable
-        if (len == 0) {
-            memcpy(buf, s, s_len);
-            len += s_len;
-            continue;
-        }
-        //overwrite previous variables.
-        if ((s[0] == '/') || (s[0] == '\\')) {
-            memcpy(buf, s, s_len);
-            len += s_len;
-            continue;
-        }
-
-        if ((buf[len-1] != '/') && (buf[len-1] != '\\')) {
-            buf[len++] = split_char;
-        }
-        memcpy(buf+len, s, s_len);
-        len += s_len;
-    }
-
-    duk_push_string(ctx, buf);
-    duk_free_raw(ctx, buf);
-    return 1;
+	return 0;
 }
 
-int _ospath_dirname(duk_context* ctx)
-{
-    int i;
-    duk_size_t n;
-    int len_1th;
-    const char* fn;
-
-    if (duk_get_top(ctx) != 1) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "missing parameters");
-    }
-
-    if (!duk_is_string(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "file name must be string");
-    }
-
-    fn = duk_get_lstring(ctx, 0, &n);
-    if (n <= 0) {
-        duk_push_string(ctx, "");
-        return 1;
-    }
-
-    for (i = n-1;i >= 0;i--) {
-        if ((fn[i] == '/') || (fn[i] == '\\')) {
-            break;
-        }
-    }
-
-    if (i < 0) {
-        len_1th = n;
-    } else {
-        len_1th = i;
-    }
-
-    if (len_1th > 0) {
-        duk_push_lstring(ctx, fn, len_1th);
-    } else {
-        duk_push_string(ctx, "");
-    }
-
-    return 1;
+static int request_exit(duk_context *ctx) {
+	(void) ctx;
+	exit_requested = 1;
+	return 0;
 }
 
-int _ospath_split(duk_context* ctx)
-{
-    int i;
-    duk_size_t n;
-    int len_1th;
-    int len_2nd;
-    const char* fn;
+static duk_function_list_entry eventloop_funcs[] = {
+	{ "createTimer", create_timer, 3 },
+	{ "deleteTimer", delete_timer, 1 },
+	{ "listenFd", listen_fd, 2 },
+	{ "requestExit", request_exit, 0 },
+	{ NULL, NULL, 0 }
+};
 
-    if (duk_get_top(ctx) != 1) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "missing parameters");
-    }
+void duk_eventloop_register(duk_context *ctx) {
+	memset((void *) timer_list, 0, MAX_TIMERS * sizeof(ev_timer));
+	memset((void *) &timer_expiring, 0, sizeof(ev_timer));
+	memset((void *) poll_list, 0, MAX_FDS * sizeof(struct pollfd));
 
-    if (!duk_is_string(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "file name must be string");
-    }
+	/* Set global 'EventLoop'. */
+	duk_push_global_object(ctx);
+	duk_push_object(ctx);
+	duk_put_function_list(ctx, -1, eventloop_funcs);
+	duk_put_prop_string(ctx, -2, "EventLoop");
+	duk_pop(ctx);
 
-    fn = duk_get_lstring(ctx, 0, &n);
-    if (n <= 0) {
-        duk_push_array(ctx);
-        duk_push_string(ctx, "");
-        duk_put_prop_index(ctx, -2, 0);
-        duk_push_string(ctx, "");
-        duk_put_prop_index(ctx, -2, 0);
-        return 1;
-    }
-
-    for (i = n-1;i >= 0;i--) {
-        if ((fn[i] == '/') || (fn[i] == '\\')) {
-            break;
-        }
-    }
-
-    if (i < 0) {
-        len_1th = n;
-        len_2nd = 0;
-    } else {
-        len_1th = i;
-        len_2nd = n-i-1;
-    }
-
-    duk_push_array(ctx);
-
-    if (len_1th > 0) {
-        duk_push_lstring(ctx, fn, len_1th);
-    } else {
-        duk_push_string(ctx, "");
-    }
-    duk_put_prop_index(ctx, -2, 0);
-
-    if (len_2nd > 0) {
-        duk_push_lstring(ctx, fn + len_1th + 1, len_2nd);
-    } else {
-        duk_push_string(ctx, "");
-    }
-    duk_put_prop_index(ctx, -2, 1);
-
-    return 1;
+	/* Initialize global stash 'eventTimers'. */
+	duk_push_global_stash(ctx);
+	duk_push_object(ctx);
+	duk_put_prop_string(ctx, -2, TIMERS_SLOT_NAME);
+	duk_pop(ctx);
 }
 
-int _ospath_splitext(duk_context* ctx)
-{
-    int i;
-    duk_size_t n;
-    int len_1th;
-    int len_2nd;
-    const char* fn;
-
-    if (duk_get_top(ctx) == 1) {
-        if (!duk_is_string(ctx, 0)) {
-            duk_error(ctx, DUK_ERR_TYPE_ERROR, "file name must be string");
-        }
-        fn = duk_get_string(ctx, 0);
-
-    } else {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "missing parameters");
-    }
-
-    fn = duk_get_lstring(ctx, 0, &n);
-    if (n <= 0) {
-        duk_push_array(ctx);
-        duk_push_string(ctx, "");
-        duk_put_prop_index(ctx, -2, 0);
-        duk_push_string(ctx, "");
-        duk_put_prop_index(ctx, -2, 0);
-        return 1;
-    }
-
-    for (i = n-1;i >= 0;i--) {
-        if (fn[i] == '.') {
-            break;
-        }
-    }
-
-    if (i < 0) {
-        len_1th = n;
-        len_2nd = 0;
-    } else {
-        len_1th = i;
-        len_2nd = n-i-1;
-    }
-
-    duk_push_array(ctx);
-
-    if (len_1th > 0) {
-        duk_push_lstring(ctx, fn, len_1th);
-    } else {
-        duk_push_string(ctx, "");
-    }
-    duk_put_prop_index(ctx, -2, 0);
-
-    if (len_2nd > 0) {
-        duk_push_lstring(ctx, fn + len_1th + 1, len_2nd);
-    } else {
-        duk_push_string(ctx, "");
-    }
-    duk_put_prop_index(ctx, -2, 1);
-
-    return 1;
+static duk_ret_t duk_native_print(duk_context *ctx) {
+	duk_push_string(ctx, " ");
+	duk_insert(ctx, 0);
+	duk_join(ctx, duk_get_top(ctx) - 1);
+	LogPrintf("%s\n", duk_safe_to_string(ctx, -1));
+	return 0;
 }
 
-int _ospath_normpath(duk_context* ctx)
-{
-    const char* s;
-    char* p;
-    duk_size_t n;
-
-    if (duk_get_top(ctx) != 1) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "only accept one string");
-    }
-    if (!duk_is_string(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "only accept string");
-    }
-
-    s = duk_get_lstring(ctx, 0, &n);
-    p = (char*)duk_alloc_raw(ctx, n);
-    memcpy(p, s, n);
-
-    n = _helper_path_normpath(ctx, p, n);
-    duk_push_lstring(ctx, p, n);
-    duk_free_raw(ctx, p);
-
-    return 1;
+static void duk_print_register(duk_context *ctx) {
+	duk_push_c_function(ctx, duk_native_print, DUK_VARARGS);
+	duk_put_global_string(ctx, "print");
 }
 
-int _ospath_abspath(duk_context* ctx)
-{
-    const char* s;
-    duk_size_t len;
-
-    if (duk_get_top(ctx) != 1) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "only accept one string");
-    }
-    if (!duk_is_string(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "only accept string");
-    }
-
-    s = duk_get_lstring(ctx, 0, &len);
-    if ((s[0] == '/') || (s[0] == '\\') ||
-        ((len >= 2) && isalpha(s[0]) && (s[1] == ':')))
-    {//absolute path already, just need normal path format.
-
-    } else {
-        duk_push_c_function(ctx, _os_getcwd, 0);
-        duk_call(ctx, 0);
-        if (duk_is_undefined(ctx, -1)) {
-            return 1;
-        }
-
-        duk_push_c_function(ctx, _ospath_join, 2);
-        duk_dup(ctx, -2);
-        duk_dup(ctx, 0);
-        duk_call(ctx, 2);
-
-        duk_replace(ctx, 0);
-        duk_pop(ctx);
-    }
-
-    duk_push_c_function(ctx, _ospath_normpath, 1);
-    duk_dup(ctx, 0);
-    duk_call(ctx, 1);
-
-    return 1;
-}
-
-int _time_time(duk_context* ctx)
-{
-    time_t t;
-
-    time(&t);
-
-    duk_push_uint(ctx, (unsigned int)t);
-
-    return 1;
-}
-
-int _time_localtime(duk_context* ctx)
-{
-    time_t t;
-    struct tm ts;
-
-    if ((duk_get_top(ctx) == 1) && !duk_is_number(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "only accept integer");
-    }
-
-    if (duk_get_top(ctx) == 1) {
-        t = duk_to_uint(ctx, 0);
-    } else {
-        time(&t);
-    }
-
-    ts = *localtime(&t);
-
-    duk_push_object(ctx);
-
-    duk_push_string(ctx, "struct_time");
-    duk_put_prop_string(ctx, -2, "name");
-
-    gs_put_c_method(ctx, "toString", _timeobj_tostring);
-
-    _helper_pack_timeobj(ctx, &ts, -1);
-
-    return 1;
-} 
-
-int _time_gmtime(duk_context* ctx)
-{
-    time_t t;
-    struct tm ts;
-
-    if ((duk_get_top(ctx) == 1) && !duk_is_number(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "only accept integer");
-    }
-
-    if (duk_get_top(ctx) == 1) {
-        t = duk_to_uint(ctx, 0);
-    } else {
-        time(&t);
-    }
-
-    ts = *gmtime(&t);
-
-    duk_push_object(ctx);
-
-    duk_push_string(ctx, "struct_time");
-    duk_put_prop_string(ctx, -2, "name");
-
-    gs_put_c_method(ctx, "toString", _timeobj_tostring);
-
-    _helper_pack_timeobj(ctx, &ts, -1);
-
-    return 1;
-} 
-
-int _time_asctime(duk_context* ctx)
-{
-    time_t t;
-    struct tm ts;
-    const char* s;
-    char buf[100];
-
-    if (duk_get_top(ctx) == 0) {
-        time(&t);
-        ts = *localtime(&t);
-
-    } else if ((duk_get_top(ctx) == 1) && duk_is_object(ctx, 0)) {
-        duk_get_prop_string(ctx, 0, "name");
-        s = duk_to_string(ctx, -1);
-        if (strcmp(s, "struct_time") == 0) {
-            _helper_unpack_timeobj(ctx, &ts, 0);
-            duk_pop(ctx);
-        } else {
-            duk_error(ctx, DUK_ERR_TYPE_ERROR,
-                    "second parameter only accept time.struct_time");
-        }
-
-    } else {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "parameter error");
-    }
-
-    //Sat May 20 15:21:51 2000
-    strftime(buf, 100, "%a %b %d %H:%M:%S %Y", &ts);
-
-    duk_push_string(ctx, buf);
-
-    return 1;
-} 
-
-int _time_ctime(duk_context* ctx)
-{
-    time_t t;
-    struct tm ts;
-    char buf[100];
-
-    if ((duk_get_top(ctx) == 1) && !duk_is_number(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "only accept integer");
-    }
-
-    if (duk_get_top(ctx) == 1) {
-        t = duk_to_uint(ctx, 0);
-    } else {
-        time(&t);
-    }
-
-    ts = *localtime(&t);
-    //Sat May 20 15:21:51 2000
-    strftime(buf, 100, "%a %b %d %H:%M:%S %Y", &ts);
-
-    duk_push_string(ctx, buf);
-
-    return 1;
-} 
-
-int _time_strftime(duk_context* ctx)
-{
-    time_t t;
-    struct tm ts;
-
-    const char* s;
-    const char* fmt;
-    int len;
-    char* out;
-
-    int success = 0;
-    int ntries = 3;
-
-    if (duk_get_top(ctx) == 0) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "missing format string");
-
-    } else if (duk_get_top(ctx) == 1) {
-        time(&t);
-        ts = *localtime(&t);
-
-    } else if (duk_get_top(ctx) == 2) {
-        if (duk_is_number(ctx, 1)) {
-            t = duk_to_uint(ctx, 1);
-            ts = *localtime(&t);
-        } else {
-            duk_get_prop_string(ctx, 1, "name");
-            s = duk_to_string(ctx, -1);
-            if (strcmp(s, "struct_time") == 0) {
-                _helper_unpack_timeobj(ctx, &ts, 1);
-                duk_pop(ctx);
-            } else {
-                duk_error(ctx, DUK_ERR_TYPE_ERROR,
-                        "second parameter only accept time or time.struct_time");
-            }
-        }
-
-    } else {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "parameter only accept time or time.struct_time");
-    }
-
-    if (!duk_is_string(ctx, 0)) {
-        duk_error(ctx, DUK_ERR_TYPE_ERROR, "only accept string");
-    }
-
-    fmt = duk_to_string(ctx, 0);
-    len = strlen(fmt) + 100;
-    out = (char*)duk_alloc_raw(ctx, len);
-
-    while (ntries--) {
-        success = strftime(out, len, fmt, &ts);
-        if (success) {
-            break;
-        }
-
-        len = len * 2;
-        out = (char*)duk_realloc_raw(ctx, out, len);
-    }
-
-    duk_push_lstring(ctx, out, strlen(out));
-    duk_free_raw(ctx, out);
-
-    return 1;
-}
-
-
-//Tips: encoding of fn must convert before used!
-//make sure is DUKLIB_DEFAULT_SYSENCODING
-int gs_include(duk_context* ctx, const char* fn)
-{
-    duk_push_c_function(ctx, _include, 1);
-    duk_push_string(ctx, fn);
-
-
-    if (duk_pcall(ctx, 1) != 0) {
-        duk_safe_call(ctx, _helper_get_stack_raw, nullptr, 1 /*nargs*/, 1 /*nrets*/);
-        fprintf(stderr, "%s\n", duk_safe_to_string(ctx, -1));
-        fflush(stderr);
-        duk_pop(ctx);
-
-        return 0;
-    }
-    duk_pop(ctx);
-
-    return 1;
-}
-
-int gs_eval_string(duk_context* ctx, const char* s)
-{
-    if (duk_peval_string(ctx, s) != 0) {
-        duk_safe_call(ctx, _helper_get_stack_raw, nullptr, 1 /*nargs*/, 1 /*nrets*/);
-
-        fprintf(stderr, "%s\n", duk_safe_to_string(ctx, -1));
-        fflush(stderr);
-
-        return 0;
-    }
-
-    return 1;
-}
-
-int gs_put_args(duk_context* ctx, int argc, char* argv[])
-{
-    int obj_id = 0;
-    int i = 0;
-    int idx = 0;
-
-    duk_push_global_object(ctx);
-    duk_get_prop_string(ctx, -1, "Modules");
-    if (duk_is_undefined(ctx, -1)) {
-        return 0;
-    }
-
-    duk_get_prop_string(ctx, -1, "sys");
-    if (duk_is_undefined(ctx, -1)) {
-        return 0;
-    }
-
-    obj_id = duk_push_array(ctx);
-    for (i = 1;i < argc;i++) {
-        duk_push_lstring(ctx, argv[i], strlen(argv[i]));
-        duk_put_prop_index(ctx, obj_id, idx++);
-    }
-    duk_put_prop_string(ctx, -2, "args");
-
-    duk_pop(ctx);//pop 'sys'
-    duk_pop(ctx);//pop 'Modules'
-    duk_pop(ctx);//pop 'global'
-
-    return argc-1;
-}
-
-//2 step:
-//
-//first : set function_entry.name  = function_name
-//second: set global.function_name = function_entry
-//must push object to stack first!
-int gs_put_c_method(duk_context* ctx,
-        const char* function_name,
-        duk_c_function function_entry)
-{
-    char* p;
-    int n;
-
-    duk_push_c_function(ctx, function_entry, DUK_VARARGS);
-
-    n = strlen(function_name);
-    p = (char *) duk_alloc_raw(ctx, n + 10 + 1);
-    memset(p, 0, n + 10 + 1);
-    memcpy(p, "__stdlib__", 10);
-    memcpy(p+10, function_name, n);
-    duk_push_string(ctx, p);
-    duk_free_raw(ctx, p);
-    duk_put_prop_string(ctx, -2, "name");
-
-    duk_put_prop_string(ctx, -2, function_name);
-
-    return 0;
-}
-
-int gs_put_c_function(duk_context* ctx,
-        const char* function_name,
-        duk_c_function function_entry)
-{
-    duk_push_global_object(ctx);
-    gs_put_c_method(ctx, function_name, function_entry);
-    duk_pop(ctx);
-
-    return 0;
-}
-
-const char* gs_type_name(duk_context* ctx, duk_idx_t index)
-{
-    int t;
-
-    t = duk_get_type(ctx, index);
-
-    switch(t) {
-        case DUK_TYPE_NONE:
-            return "none";
-        case DUK_TYPE_UNDEFINED:
-            return "undefined";
-        case DUK_TYPE_NULL:
-            return "null";
-        case DUK_TYPE_BOOLEAN:
-            return "boolean";
-        case DUK_TYPE_NUMBER:
-            return "number";
-        case DUK_TYPE_STRING:
-            return "string";
-        case DUK_TYPE_OBJECT:
-            return "object";
-        case DUK_TYPE_BUFFER:
-            return "buffer";
-        case DUK_TYPE_POINTER:
-            return "pointer";
-        default:
-            return "error";
-    }
-}
-
-
-void _dukopen_buildin_extend(duk_context* ctx)
-{
-    duk_push_global_object(ctx);
-
-    gs_put_c_method(ctx, "ord",                 _ord);
-    gs_put_c_method(ctx, "chr",                 _chr);
-    gs_put_c_method(ctx, "hex",                 _hex);
-    gs_put_c_method(ctx, "globals",             _globals);
-    gs_put_c_method(ctx, "dir",                 _dir);
-    gs_put_c_method(ctx, "include",             _include);
-    gs_put_c_method(ctx, "deepcopy1",           _deepcopy1);
-
-    duk_pop(ctx);
-}
-
-void _push_traces_obj(duk_context* ctx)
-{
-    duk_push_global_object(ctx);
-    duk_push_undefined(ctx);
-    duk_put_prop_string(ctx, -2, "__file__");
-    duk_pop(ctx);
-
-    duk_push_array(ctx);
-}
-
-void _push_fs_obj(duk_context* ctx)
-{
-    duk_push_object(ctx);
-    gs_put_c_method(ctx, "open",                _fs_open);
-    gs_put_c_method(ctx, "file_get_content",    _fs_file_get_content);
-    gs_put_c_method(ctx, "file_put_content",    _fs_file_put_content);
-}
-
-void _push_os_path_obj(duk_context* ctx)
-{
-    duk_push_object(ctx);
-    gs_put_c_method(ctx, "isdir",               _ospath_isdir);
-    gs_put_c_method(ctx, "isfile",              _ospath_isfile);
-    gs_put_c_method(ctx, "exists",              _ospath_exists);
-    gs_put_c_method(ctx, "join",                _ospath_join);
-    gs_put_c_method(ctx, "dirname",             _ospath_dirname);
-    gs_put_c_method(ctx, "split",               _ospath_split);
-    gs_put_c_method(ctx, "splitext",            _ospath_splitext);
-    gs_put_c_method(ctx, "normpath",            _ospath_normpath);
-    gs_put_c_method(ctx, "abspath",             _ospath_abspath);
-}
-
-void _push_os_obj(duk_context* ctx)
-{
-    duk_push_object(ctx);
-
-    gs_put_c_method(ctx, "getcwd",              _os_getcwd);
-    gs_put_c_method(ctx, "data",              _os_getdatadir);
-    gs_put_c_method(ctx, "modules",              _os_getmoduledir);
-    gs_put_c_method(ctx, "workspace",              _os_getworkspacedir);
-#ifdef DUK_F_WINDOWS
-    duk_push_string(ctx, "nt");
+#if defined(_MSC_VER) && (_MSC_VER < 1900)
+#define snprintf _snprintf
+#endif
+
+#if 0  /* Enable manually */
+#define DUK__ASSERT(x) do { \
+		if (!(x)) { \
+			fprintf(stderr, "ASSERTION FAILED at %s:%d: " #x "\n", __FILE__, __LINE__); \
+			fflush(stderr);  \
+		} \
+	} while (0)
+#define DUK__ASSERT_TOP(ctx,val) do { \
+		DUK__ASSERT(duk_get_top((ctx)) == (val)); \
+	} while (0)
 #else
-    duk_push_string(ctx, "posix");
+#define DUK__ASSERT(x) do { (void) (x); } while (0)
+#define DUK__ASSERT_TOP(ctx,val) do { (void) ctx; (void) (val); } while (0)
 #endif
-    duk_put_prop_string(ctx, -2, "name");
+
+static void duk__resolve_module_id(duk_context *ctx, const char *req_id, const char *mod_id) {
+	duk_uint8_t buf[DUK_COMMONJS_MODULE_ID_LIMIT];
+	duk_uint8_t *p;
+	duk_uint8_t *q;
+	duk_uint8_t *q_last;  /* last component */
+	duk_int_t int_rc;
+
+	DUK__ASSERT(req_id != NULL);
+	/* mod_id may be NULL */
+
+	/*
+	 *  A few notes on the algorithm:
+	 *
+	 *    - Terms are not allowed to begin with a period unless the term
+	 *      is either '.' or '..'.  This simplifies implementation (and
+	 *      is within CommonJS modules specification).
+	 *
+	 *    - There are few output bound checks here.  This is on purpose:
+	 *      the resolution input is length checked and the output is never
+	 *      longer than the input.  The resolved output is written directly
+	 *      over the input because it's never longer than the input at any
+	 *      point in the algorithm.
+	 *
+	 *    - Non-ASCII characters are processed as individual bytes and
+	 *      need no special treatment.  However, U+0000 terminates the
+	 *      algorithm; this is not an issue because U+0000 is not a
+	 *      desirable term character anyway.
+	 */
+
+	/*
+	 *  Set up the resolution input which is the requested ID directly
+	 *  (if absolute or no current module path) or with current module
+	 *  ID prepended (if relative and current module path exists).
+	 *
+	 *  Suppose current module is 'foo/bar' and relative path is './quux'.
+	 *  The 'bar' component must be replaced so the initial input here is
+	 *  'foo/bar/.././quux'.
+	 */
+
+	if (mod_id != NULL && req_id[0] == '.') {
+		int_rc = snprintf((char *) buf, sizeof(buf), "%s/../%s", mod_id, req_id);
+	} else {
+		int_rc = snprintf((char *) buf, sizeof(buf), "%s", req_id);
+	}
+	if (int_rc >= (duk_int_t) sizeof(buf) || int_rc < 0) {
+		/* Potentially truncated, NUL not guaranteed in any case.
+		 * The (int_rc < 0) case should not occur in practice.
+		 */
+		goto resolve_error;
+	}
+	DUK__ASSERT(strlen((const char *) buf) < sizeof(buf));  /* at most sizeof(buf) - 1 */
+
+	/*
+	 *  Resolution loop.  At the top of the loop we're expecting a valid
+	 *  term: '.', '..', or a non-empty identifier not starting with a period.
+	 */
+
+	p = buf;
+	q = buf;
+	for (;;) {
+		duk_uint_fast8_t c;
+
+		/* Here 'p' always points to the start of a term.
+		 *
+		 * We can also unconditionally reset q_last here: if this is
+		 * the last (non-empty) term q_last will have the right value
+		 * on loop exit.
+		 */
+
+		DUK__ASSERT(p >= q);  /* output is never longer than input during resolution */
+
+		q_last = q;
+
+		c = *p++;
+		if (c == 0) {
+			goto resolve_error;
+		} else if (c == '.') {
+			c = *p++;
+			if (c == '/') {
+				/* Term was '.' and is eaten entirely (including dup slashes). */
+				goto eat_dup_slashes;
+			}
+			if (c == '.' && *p == '/') {
+				/* Term was '..', backtrack resolved name by one component.
+				 *  q[-1] = previous slash (or beyond start of buffer)
+				 *  q[-2] = last char of previous component (or beyond start of buffer)
+				 */
+				p++;  /* eat (first) input slash */
+				DUK__ASSERT(q >= buf);
+				if (q == buf) {
+					goto resolve_error;
+				}
+				DUK__ASSERT(*(q - 1) == '/');
+				q--;  /* Backtrack to last output slash (dups already eliminated). */
+				for (;;) {
+					/* Backtrack to previous slash or start of buffer. */
+					DUK__ASSERT(q >= buf);
+					if (q == buf) {
+						break;
+					}
+					if (*(q - 1) == '/') {
+						break;
+					}
+					q--;
+				}
+				goto eat_dup_slashes;
+			}
+			goto resolve_error;
+		} else if (c == '/') {
+			/* e.g. require('/foo'), empty terms not allowed */
+			goto resolve_error;
+		} else {
+			for (;;) {
+				/* Copy term name until end or '/'. */
+				*q++ = c;
+				c = *p++;
+				if (c == 0) {
+					/* This was the last term, and q_last was
+					 * updated to match this term at loop top.
+					 */
+					goto loop_done;
+				} else if (c == '/') {
+					*q++ = '/';
+					break;
+				} else {
+					/* write on next loop */
+				}
+			}
+		}
+
+	 eat_dup_slashes:
+		for (;;) {
+			/* eat dup slashes */
+			c = *p;
+			if (c != '/') {
+				break;
+			}
+			p++;
+		}
+	}
+ loop_done:
+	/* Output #1: resolved absolute name. */
+	DUK__ASSERT(q >= buf);
+	duk_push_lstring(ctx, (const char *) buf, (size_t) (q - buf));
+
+	/* Output #2: last component name. */
+	DUK__ASSERT(q >= q_last);
+	DUK__ASSERT(q_last >= buf);
+	duk_push_lstring(ctx, (const char *) q_last, (size_t) (q - q_last));
+	return;
+
+ resolve_error:
+	(void) duk_type_error(ctx, "cannot resolve module id: %s", (const char *) req_id);
 }
 
-void _push_time_obj(duk_context* ctx)
-{
-    duk_push_object(ctx);
-    gs_put_c_method(ctx, "time",                _time_time);
-    gs_put_c_method(ctx, "localtime",           _time_localtime);
-    gs_put_c_method(ctx, "gmtime",              _time_gmtime);
-    gs_put_c_method(ctx, "asctime",             _time_asctime);
-    gs_put_c_method(ctx, "ctime",               _time_ctime);
-    gs_put_c_method(ctx, "strftime",            _time_strftime);
+/* Stack indices for better readability. */
+#define DUK__IDX_REQUESTED_ID   0   /* module id requested */
+#define DUK__IDX_REQUIRE        1   /* current require() function */
+#define DUK__IDX_REQUIRE_ID     2   /* the base ID of the current require() function, resolution base */
+#define DUK__IDX_RESOLVED_ID    3   /* resolved, normalized absolute module ID */
+#define DUK__IDX_LASTCOMP       4   /* last component name in resolved path */
+#define DUK__IDX_DUKTAPE        5   /* Duktape object */
+#define DUK__IDX_MODLOADED      6   /* Duktape.modLoaded[] module cache */
+#define DUK__IDX_UNDEFINED      7   /* 'undefined', artifact of lookup */
+#define DUK__IDX_FRESH_REQUIRE  8   /* new require() function for module, updated resolution base */
+#define DUK__IDX_EXPORTS        9   /* default exports table */
+#define DUK__IDX_MODULE         10  /* module object containing module.exports, etc */
+
+static duk_ret_t duk__require(duk_context *ctx) {
+	const char *str_req_id;  /* requested identifier */
+	const char *str_mod_id;  /* require.id of current module */
+	duk_int_t pcall_rc;
+
+	/* NOTE: we try to minimize code size by avoiding unnecessary pops,
+	 * so the stack looks a bit cluttered in this function.  DUK__ASSERT_TOP()
+	 * assertions are used to ensure stack configuration is correct at each
+	 * step.
+	 */
+
+	/*
+	 *  Resolve module identifier into canonical absolute form.
+	 */
+
+	str_req_id = duk_require_string(ctx, DUK__IDX_REQUESTED_ID);
+	duk_push_current_function(ctx);
+	duk_get_prop_string(ctx, -1, "id");
+	str_mod_id = duk_get_string(ctx, DUK__IDX_REQUIRE_ID);  /* ignore non-strings */
+	duk__resolve_module_id(ctx, str_req_id, str_mod_id);
+	str_req_id = NULL;
+	str_mod_id = NULL;
+
+	/* [ requested_id require require.id resolved_id last_comp ] */
+	DUK__ASSERT_TOP(ctx, DUK__IDX_LASTCOMP + 1);
+
+	/*
+	 *  Cached module check.
+	 *
+	 *  If module has been loaded or its loading has already begun without
+	 *  finishing, return the same cached value (module.exports).  The
+	 *  value is registered when module load starts so that circular
+	 *  references can be supported to some extent.
+	 */
+
+	duk_push_global_stash(ctx);
+	duk_get_prop_string(ctx, -1, "\xff" "module:Duktape");
+	duk_remove(ctx, -2);  /* Lookup stashed, original 'Duktape' object. */
+	duk_get_prop_string(ctx, DUK__IDX_DUKTAPE, "modLoaded");  /* Duktape.modLoaded */
+	duk_require_type_mask(ctx, DUK__IDX_MODLOADED, DUK_TYPE_MASK_OBJECT);
+	DUK__ASSERT_TOP(ctx, DUK__IDX_MODLOADED + 1);
+
+	duk_dup(ctx, DUK__IDX_RESOLVED_ID);
+	if (duk_get_prop(ctx, DUK__IDX_MODLOADED)) {
+		/* [ requested_id require require.id resolved_id last_comp Duktape Duktape.modLoaded Duktape.modLoaded[id] ] */
+		duk_get_prop_string(ctx, -1, "exports");  /* return module.exports */
+		return 1;
+	}
+	DUK__ASSERT_TOP(ctx, DUK__IDX_UNDEFINED + 1);
+
+	/* [ requested_id require require.id resolved_id last_comp Duktape Duktape.modLoaded undefined ] */
+
+	/*
+	 *  Module not loaded (and loading not started previously).
+	 *
+	 *  Create a new require() function with 'id' set to resolved ID
+	 *  of module being loaded.  Also create 'exports' and 'module'
+	 *  tables but don't register exports to the loaded table yet.
+	 *  We don't want to do that unless the user module search callbacks
+	 *  succeeds in finding the module.
+	 */
+
+	/* Fresh require: require.id is left configurable (but not writable)
+	 * so that is not easy to accidentally tweak it, but it can still be
+	 * done with Object.defineProperty().
+	 *
+	 * XXX: require.id could also be just made non-configurable, as there
+	 * is no practical reason to touch it (at least from ECMAScript code).
+	 */
+	duk_push_c_function(ctx, duk__require, 1 /*nargs*/);
+	duk_push_string(ctx, "name");
+	duk_push_string(ctx, "gs_require");
+	duk_def_prop(ctx, DUK__IDX_FRESH_REQUIRE, DUK_DEFPROP_HAVE_VALUE);  /* not writable, not enumerable, not configurable */
+	duk_push_string(ctx, "id");
+	duk_dup(ctx, DUK__IDX_RESOLVED_ID);
+	duk_def_prop(ctx, DUK__IDX_FRESH_REQUIRE, DUK_DEFPROP_HAVE_VALUE | DUK_DEFPROP_SET_CONFIGURABLE);  /* a fresh require() with require.id = resolved target module id */
+
+	/* Module table:
+	 * - module.exports: initial exports table (may be replaced by user)
+	 * - module.id is non-writable and non-configurable, as the CommonJS
+	 *   spec suggests this if possible
+	 * - module.filename: not set, defaults to resolved ID if not explicitly
+	 *   set by modSearch() (note capitalization, not .fileName, matches Node.js)
+	 * - module.name: not set, defaults to last component of resolved ID if
+	 *   not explicitly set by modSearch()
+	 */
+	duk_push_object(ctx);  /* exports */
+	duk_push_object(ctx);  /* module */
+	duk_push_string(ctx, "exports");
+	duk_dup(ctx, DUK__IDX_EXPORTS);
+	duk_def_prop(ctx, DUK__IDX_MODULE, DUK_DEFPROP_HAVE_VALUE | DUK_DEFPROP_SET_WRITABLE | DUK_DEFPROP_SET_CONFIGURABLE);  /* module.exports = exports */
+	duk_push_string(ctx, "id");
+	duk_dup(ctx, DUK__IDX_RESOLVED_ID);  /* resolved id: require(id) must return this same module */
+	duk_def_prop(ctx, DUK__IDX_MODULE, DUK_DEFPROP_HAVE_VALUE);  /* module.id = resolved_id; not writable, not enumerable, not configurable */
+	duk_compact(ctx, DUK__IDX_MODULE);  /* module table remains registered to modLoaded, minimize its size */
+	DUK__ASSERT_TOP(ctx, DUK__IDX_MODULE + 1);
+
+	/* [ requested_id require require.id resolved_id last_comp Duktape Duktape.modLoaded undefined fresh_require exports module ] */
+
+	/* Register the module table early to modLoaded[] so that we can
+	 * support circular references even in modSearch().  If an error
+	 * is thrown, we'll delete the reference.
+	 */
+	duk_dup(ctx, DUK__IDX_RESOLVED_ID);
+	duk_dup(ctx, DUK__IDX_MODULE);
+	duk_put_prop(ctx, DUK__IDX_MODLOADED);  /* Duktape.modLoaded[resolved_id] = module */
+
+	/*
+	 *  Call user provided module search function and build the wrapped
+	 *  module source code (if necessary).  The module search function
+	 *  can be used to implement pure Ecmacsript, pure C, and mixed
+	 *  ECMAScript/C modules.
+	 *
+	 *  The module search function can operate on the exports table directly
+	 *  (e.g. DLL code can register values to it).  It can also return a
+	 *  string which is interpreted as module source code (if a non-string
+	 *  is returned the module is assumed to be a pure C one).  If a module
+	 *  cannot be found, an error must be thrown by the user callback.
+	 *
+	 *  Because Duktape.modLoaded[] already contains the module being
+	 *  loaded, circular references for C modules should also work
+	 *  (although expected to be quite rare).
+	 */
+
+	duk_push_string(ctx, "(function(require,exports,module){");
+
+	/* Duktape.modSearch(resolved_id, fresh_require, exports, module). */
+	duk_get_prop_string(ctx, DUK__IDX_DUKTAPE, "modSearch");  /* Duktape.modSearch */
+	duk_dup(ctx, DUK__IDX_RESOLVED_ID);
+	duk_dup(ctx, DUK__IDX_FRESH_REQUIRE);
+	duk_dup(ctx, DUK__IDX_EXPORTS);
+	duk_dup(ctx, DUK__IDX_MODULE);  /* [ ... Duktape.modSearch resolved_id last_comp fresh_require exports module ] */
+	pcall_rc = duk_pcall(ctx, 4 /*nargs*/);  /* -> [ ... source ] */
+	DUK__ASSERT_TOP(ctx, DUK__IDX_MODULE + 3);
+
+	if (pcall_rc != DUK_EXEC_SUCCESS) {
+		/* Delete entry in Duktape.modLoaded[] and rethrow. */
+		goto delete_rethrow;
+	}
+
+	/* If user callback did not return source code, module loading
+	 * is finished (user callback initialized exports table directly).
+	 */
+	if (!duk_is_string(ctx, -1)) {
+		/* User callback did not return source code, so module loading
+		 * is finished: just update modLoaded with final module.exports
+		 * and we're done.
+		 */
+		goto return_exports;
+	}
+
+	/* Finish the wrapped module source.  Force module.filename as the
+	 * function .fileName so it gets set for functions defined within a
+	 * module.  This also ensures loggers created within the module get
+	 * the module ID (or overridden filename) as their default logger name.
+	 * (Note capitalization: .filename matches Node.js while .fileName is
+	 * used elsewhere in Duktape.)
+	 */
+	duk_push_string(ctx, "\n})");  /* Newline allows module last line to contain a // comment. */
+	duk_concat(ctx, 3);
+	if (!duk_get_prop_string(ctx, DUK__IDX_MODULE, "filename")) {
+		/* module.filename for .fileName, default to resolved ID if
+		 * not present.
+		 */
+		duk_pop(ctx);
+		duk_dup(ctx, DUK__IDX_RESOLVED_ID);
+	}
+	pcall_rc = duk_pcompile(ctx, DUK_COMPILE_EVAL);
+	if (pcall_rc != DUK_EXEC_SUCCESS) {
+		goto delete_rethrow;
+	}
+	pcall_rc = duk_pcall(ctx, 0);  /* -> eval'd function wrapper (not called yet) */
+	if (pcall_rc != DUK_EXEC_SUCCESS) {
+		goto delete_rethrow;
+	}
+
+	/* Module has now evaluated to a wrapped module function.  Force its
+	 * .name to match module.name (defaults to last component of resolved
+	 * ID) so that it is shown in stack traces too.  Note that we must not
+	 * introduce an actual name binding into the function scope (which is
+	 * usually the case with a named function) because it would affect the
+	 * scope seen by the module and shadow accesses to globals of the same name.
+	 * This is now done by compiling the function as anonymous and then forcing
+	 * its .name without setting a "has name binding" flag.
+	 */
+
+	duk_push_string(ctx, "name");
+	if (!duk_get_prop_string(ctx, DUK__IDX_MODULE, "name")) {
+		/* module.name for .name, default to last component if
+		 * not present.
+		 */
+		duk_pop(ctx);
+		duk_dup(ctx, DUK__IDX_LASTCOMP);
+	}
+	duk_def_prop(ctx, -3, DUK_DEFPROP_HAVE_VALUE | DUK_DEFPROP_FORCE);
+
+	/*
+	 *  Call the wrapped module function.
+	 *
+	 *  Use a protected call so that we can update Duktape.modLoaded[resolved_id]
+	 *  even if the module throws an error.
+	 */
+
+	/* [ requested_id require require.id resolved_id last_comp Duktape Duktape.modLoaded undefined fresh_require exports module mod_func ] */
+	DUK__ASSERT_TOP(ctx, DUK__IDX_MODULE + 2);
+
+	duk_dup(ctx, DUK__IDX_EXPORTS);  /* exports (this binding) */
+	duk_dup(ctx, DUK__IDX_FRESH_REQUIRE);  /* fresh require (argument) */
+	duk_get_prop_string(ctx, DUK__IDX_MODULE, "exports");  /* relookup exports from module.exports in case it was changed by modSearch */
+	duk_dup(ctx, DUK__IDX_MODULE);  /* module (argument) */
+	DUK__ASSERT_TOP(ctx, DUK__IDX_MODULE + 6);
+
+	/* [ requested_id require require.id resolved_id last_comp Duktape Duktape.modLoaded undefined fresh_require exports module mod_func exports fresh_require exports module ] */
+
+	pcall_rc = duk_pcall_method(ctx, 3 /*nargs*/);
+	if (pcall_rc != DUK_EXEC_SUCCESS) {
+		/* Module loading failed.  Node.js will forget the module
+		 * registration so that another require() will try to load
+		 * the module again.  Mimic that behavior.
+		 */
+		goto delete_rethrow;
+	}
+
+	/* [ requested_id require require.id resolved_id last_comp Duktape Duktape.modLoaded undefined fresh_require exports module result(ignored) ] */
+	DUK__ASSERT_TOP(ctx, DUK__IDX_MODULE + 2);
+
+	/* fall through */
+
+ return_exports:
+	duk_get_prop_string(ctx, DUK__IDX_MODULE, "exports");
+	duk_compact(ctx, -1);  /* compact the exports table */
+	return 1;  /* return module.exports */
+
+ delete_rethrow:
+	duk_dup(ctx, DUK__IDX_RESOLVED_ID);
+	duk_del_prop(ctx, DUK__IDX_MODLOADED);  /* delete Duktape.modLoaded[resolved_id] */
+	(void) duk_throw(ctx);  /* rethrow original error */
+	return 0;  /* not reachable */
 }
 
-void _push_sys_obj(duk_context* ctx)
-{
-    duk_push_object(ctx);
-    duk_push_undefined(ctx);
-    duk_put_prop_string(ctx, -2, "args");
+void duk_module_register(duk_context *ctx) {
+	/* Stash 'Duktape' in case it's modified. */
+	duk_push_global_stash(ctx);
+	duk_get_global_string(ctx, "Duktape");
+	duk_put_prop_string(ctx, -2, "\xff" "module:Duktape");
+	duk_pop(ctx);
+
+	/* Register `require` as a global function. */
+	duk_eval_string(ctx,
+		"(function(req){"
+		"var D=Object.defineProperty;"
+		"D(req,'name',{value:'gs_require'});"
+		"D(this,'gs_require',{value:req,writable:true,configurable:true});"
+		"D(Duktape,'modLoaded',{value:Object.create(null),writable:true,configurable:true});"
+		"})");
+	duk_push_c_function(ctx, duk__require, 1 /*nargs*/);
+	duk_call(ctx, 1);
+	duk_pop(ctx);
 }
 
-void _push_subprocess_obj(duk_context* ctx)
-{
-    duk_push_object(ctx);
-    gs_put_c_method(ctx, "open", _ps_open);
-}
-
-void _set_modsearch(duk_context* ctx)
-{
-    const char script[] = 
-        "Duktape.modSearch = function (id, include, exports, module) {\r\n"
-        "    var obj = Modules[id];\r\n"
-        "    if (obj) {\r\n"
-        "        deepcopy1(obj, exports);\r\n"
-        "        return;\r\n"
-        "\r\n"
-        "    } else {\r\n"
-        "        //try load script\r\n"
-        "        var os         = Modules.os;\r\n"
-        "        var fs         = Modules.fs;\r\n"
-        "        var path       = os.path;\r\n"
-        "        var dirname    = path.dirname(__file__);\r\n"
-        "        var fn         = path.join(dirname, id);\r\n"
-        "        var absfn      = path.abspath(fn);\r\n"
-        "        if (!path.isfile(absfn)) {\r\n"
-        "            dirname    = os.getcwd();\r\n"
-        "            fn         = path.join(dirname, id);\r\n"
-        "            absfn      = path.abspath(fn);\r\n"
-        "            if (!path.isfile(absfn)) {\r\n"
-        "                throw new Error('module not found: ' + id);\r\n"
-        "            }\r\n"
-        "        }\r\n"
-        "\r\n"
-        "        return fs.file_get_content(absfn);\r\n"
-        "    }\r\n"
-        "\r\n"
-        "    throw new Error('module not found: ' + id);\r\n"
-        "}\r\n";
-
-    duk_eval_string_noresult(ctx, script);
-}
-
-int dukopen_gs(duk_context* ctx)
-{
-    _dukopen_buildin_extend(ctx);
-
-    ////////////////////////////////////////////////////////
-    duk_push_global_object(ctx);
-    duk_push_object(ctx);
+#undef DUK__ASSERT
+#undef DUK__ASSERT_TOP
+#undef DUK__IDX_REQUESTED_ID
+#undef DUK__IDX_REQUIRE
+#undef DUK__IDX_REQUIRE_ID
+#undef DUK__IDX_RESOLVED_ID
+#undef DUK__IDX_LASTCOMP
+#undef DUK__IDX_DUKTAPE
+#undef DUK__IDX_MODLOADED
+#undef DUK__IDX_UNDEFINED
+#undef DUK__IDX_FRESH_REQUIRE
+#undef DUK__IDX_EXPORTS
+#undef DUK__IDX_MODULE
 
 
-    _push_traces_obj(ctx);
-    duk_put_prop_string(ctx, -2, "traces");
-
-    _push_fs_obj(ctx);
-    duk_put_prop_string(ctx, -2, "fs");
-
-    _push_os_obj(ctx);
-    _push_os_path_obj(ctx);
-    duk_put_prop_string(ctx, -2, "path");
-    duk_put_prop_string(ctx, -2, "os");
-
-    _push_os_path_obj(ctx);
-    duk_put_prop_string(ctx, -2, "os.path");
-
-    _push_time_obj(ctx);
-    duk_put_prop_string(ctx, -2, "time");
-
-    _push_sys_obj(ctx);
-    duk_put_prop_string(ctx, -2, "sys");
-
-    _push_subprocess_obj(ctx);
-    duk_put_prop_string(ctx, -2, "_subprocess");
-
-
-    duk_put_prop_string(ctx, -2, "Modules");
-    duk_pop(ctx);//pop [global]
-
-    ////////////////////////////////////////////////////////
-    _set_modsearch(ctx);
-
-    return 0;
-}
-
-
-static duk_ret_t compile_module(duk_context *ctx) {
-	const char *path = (const char *) duk_require_pointer(ctx, -3);
-    const char *name = (const char *) duk_require_pointer(ctx, -2);
-        
-    fs::path src(path);
-    FILE *fp = fsbridge::fopen(src, "r");
-
-    std::string s;
-    if (fp) {
-        while (int c = fgetc(fp)) {
-            s += (char) c;
-        }
-        fclose(fp);
-    }
-    s = std::string("(function(module, exports) {") + std::string(s) + std::string("})");
-
-	duk_uint_t flags = DUK_COMPILE_SHEBANG;
-	duk_compile_lstring_filename(ctx, flags, s.c_str(), s.length());
-
-    duk_dup_top(ctx);
-	duk_dump_function(ctx);
-
-    duk_size_t bc_len = 0;
-	void *bc = duk_require_buffer_data(ctx, -1, &bc_len);
-        
-    fs::path dir = GetDefaultDataDir() / "modules/";
-    TryCreateDirectories(dir);
-    fs::path mod = dir / (std::string(name) + ".module");
-
-    fp = fsbridge::fopen(mod, "wb");
-    if (fp) {
-        fwrite(bc, 1, bc_len, fp);
-        fclose(fp);
-    }
-
-    return 0;
-}
-
-static duk_ret_t load_file(duk_context *ctx) {
-	const char *path = (const char *) duk_require_pointer(ctx, -3);
-
-    fs::path src(path);
-    FILE *fp = fsbridge::fopen(src, "r");
-
-    std::string s;
-    if (fp) {
-        while (int c = fgetc(fp)) {
-            s += (char) c;
-        }
-        fclose(fp);
-    }
-    s = std::string("(function(module, exports) {") + std::string(s) + std::string("})");
-
-	duk_uint_t flags = DUK_COMPILE_SHEBANG;
-	duk_compile_lstring_filename(ctx, flags, s.c_str(), s.length());
-
-    return 0;
-}
-
-static duk_ret_t require(duk_context *ctx) {
-    const char *name = (const char *) duk_require_pointer(ctx, -2);
-
-    fs::path dir = GetDefaultDataDir() / "modules/";
-    TryCreateDirectories(dir);
-    fs::path mod = dir / (std::string(name) + ".module");
-
-    size_t size = 0; void *code = nullptr;
-
-    FILE *fp = fsbridge::fopen(mod, "rb");
-    if (fp) {
-        fseek(fp, 0, SEEK_END);
-        size = ftell(fp);
-        fseek(fp, 0, SEEK_SET);
-        code = malloc(size);
-        fread(code, 1, size, fp);
-        fclose(fp);
-
-
-        void *buf = duk_push_fixed_buffer(ctx, size);
-	    memcpy(buf, code, size);
-	    duk_load_function(ctx);
-
-        return 1;
-    }
-        	
-    return 0;
-}
-
+const char *polyfill =
+"function setTimeout(func, delay) {"
+"   var cb_func;"
+"   var bind_args;"
+"   var timer_id;"
+"   if (typeof delay !== 'number') {"
+"       if (typeof delay === 'undefined') {"
+"           delay = 0;"
+"       } else {"
+"           throw new TypeError('invalid delay');"
+"       }"
+"   }"
+"   if (typeof func === 'string') {"
+"       cb_func = eval.bind(this, func);"
+"   } else if (typeof func !== 'function') {"
+"       throw new TypeError('callback is not a function/string');"
+"   } else if (arguments.length > 2) {"
+"       bind_args = Array.prototype.slice.call(arguments, 2);"
+"       bind_args.unshift(this);"
+"       cb_func = func.bind.apply(func, bind_args);"
+"   } else {"
+"       cb_func = func;"
+"   }"
+"   timer_id = EventLoop.createTimer(cb_func, delay, true);"
+"   return timer_id;"
+"}"
+"function clearTimeout(timer_id) {"
+"   if (typeof timer_id !== 'number') {"
+"       throw new TypeError('timer ID is not a number');"
+"   }"
+"   var success = EventLoop.deleteTimer(timer_id);"
+"}"
+"function setInterval(func, delay) {"
+"   var cb_func;"
+"   var bind_args;"
+"   var timer_id;"
+"   if (typeof delay !== 'number') {"
+"       if (typeof delay === 'undefined') {"
+"           delay = 0;"
+"       } else {"
+"           throw new TypeError('invalid delay');"
+"       }"
+"   }"
+"   if (typeof func === 'string') {"
+"       cb_func = eval.bind(this, func);"
+"   } else if (typeof func !== 'function') {"
+"       throw new TypeError('callback is not a function/string');"
+"   } else if (arguments.length > 2) {"
+"       bind_args = Array.prototype.slice.call(arguments, 2);"
+"       bind_args.unshift(this);"
+"       cb_func = func.bind.apply(func, bind_args);"
+"   } else {"
+"       cb_func = func;"
+"   }"
+"   timer_id = EventLoop.createTimer(cb_func, delay, false);"
+"   return timer_id;"
+"}"
+"function clearInterval(timer_id) {"
+"   if (typeof timer_id !== 'number') {"
+"       throw new TypeError('timer ID is not a number');"
+"   }"
+"   EventLoop.deleteTimer(timer_id);"
+"}"
+"function requestEventLoopExit() {"
+"   EventLoop.requestExit();"
+"}"
+"EventLoop.socketListening = {};"
+"EventLoop.socketReading = {};"
+"EventLoop.socketConnecting = {};"
+"EventLoop.fdPollHandler = function(fd, revents) {"
+"   var data;"
+"   var cb;"
+"   var rc;"
+"   var acc_res;"
+"   if (revents & Poll.POLLIN) {"
+"       cb = this.socketReading[fd];"
+"       if (cb) {"
+"           data = Socket.read(fd);"
+"           if (data.length === 0) {"
+"               this.close(fd);"
+"               return;"
+"           }"
+"           cb(fd, data);"
+"       } else {"
+"           cb = this.socketListening[fd];"
+"           if (cb) {"
+"               acc_res = Socket.accept(fd);"
+"               cb(acc_res.fd, acc_res.addr, acc_res.port);"
+"           }"
+"       }"
+"   }"
+"   if (revents & Poll.POLLOUT) {"
+"       cb = this.socketConnecting[fd];"
+"       if (cb) {"
+"           delete this.socketConnecting[fd];"
+"           cb(fd);"
+"       }"
+"   }"
+"   if ((revents & ~(Poll.POLLIN | Poll.POLLOUT)) !== 0)"
+"       this.close(fd);"
+"}"
+"EventLoop.server = function(address, port, cb_accepted) {"
+"   var fd = Socket.createServerSocket(address, port);"
+"   this.socketListening[fd] = cb_accepted;"
+"   this.listenFd(fd, Poll.POLLIN);"
+"}"
+"EventLoop.connect = function(address, port, cb_connected) {"
+"   var fd = Socket.connect(address, port);"
+"   this.socketConnecting[fd] = cb_connected;"
+"   this.listenFd(fd, Poll.POLLOUT);"
+"}"
+"EventLoop.close = function(fd) {"
+"   EventLoop.listenFd(fd, 0);"
+"   delete this.socketListening[fd];"
+"   delete this.socketReading[fd];"
+"   delete this.socketConnecting[fd];"
+"   Socket.close(fd);"
+"}"
+"EventLoop.setReader = function(fd, cb_read) {"
+"   this.socketReading[fd] = cb_read;"
+"   this.listenFd(fd, Poll.POLLIN);"
+"}"
+"EventLoop.write = function(fd, data) {"
+"   if (typeof data === 'string') {"
+"       data = new TextEncoder().encode(data);"
+"   }"
+"   var rc = Socket.write(fd, data);"
+"}"
+"function require(name) {"
+"	if (name == 'eventloop') return EventLoop;"
+"	return gs_require(name);"
+"}";
 
 
 bool GSInit() {
@@ -3080,14 +2080,12 @@ bool GSInit() {
     if (!ctx) return false;
 
     duk_console_init(ctx, false);
+	duk_print_register(ctx);
+	duk_poll_register(ctx);
+	duk_socket_register(ctx);
+	duk_module_register(ctx);
 
-	/*duk_push_c_function(ctx, fileio_read_file, 1);
-	duk_put_global_string(ctx, "readFile");
-
-	duk_push_c_function(ctx, fileio_write_file, 2);
-	duk_put_global_string(ctx, "writeFile");
-
-    dukopen_gs(ctx);*/
+    duk_peval_string_noresult(ctx, polyfill);
 
     return true;
 }
@@ -3100,4 +2098,22 @@ bool GSExec(const std::string &code) {
     if (code.empty()) return false;
     duk_peval_string_noresult(ctx, code.c_str());
 	return true;
+}
+
+bool GSLoadBinary(const std::vector<uint8_t> &code) {
+    if (code.empty()) return false;
+	void *p = duk_push_buffer(ctx, code.size(), 0);
+	memcpy(p, code.data(), code.size());
+	duk_load_function(ctx);
+    return true;
+}
+
+bool GSExecBinary(const std::vector<uint8_t> &code) {
+    if (code.empty()) return false;
+	if (!GSLoadBinary(code)) return false;
+	if (duk_pcall(ctx, 0) != DUK_EXEC_SUCCESS) {
+        LogPrintf("Script Error: %s\n", duk_safe_to_string(ctx, -1));
+        return false;
+    }
+    return true;
 }
