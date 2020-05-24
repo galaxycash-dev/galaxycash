@@ -3184,7 +3184,7 @@ bool CChainState::AcceptBlock(const std::shared_ptr<const CBlock>& pblock, CVali
         return state.DoS(100, false, REJECT_INVALID, "bad-block-type", false, "proof of stake wave is not started");      
     }
 
-    if (!pblock->IsDeveloperBlock() && pblock->IsProofOfWork() && (nHeight < 650000) && (nHeight > chainparams.GetConsensus().nLastPoW)) {
+    if (!pblock->IsDeveloperBlock() && pblock->IsProofOfWork() && (nHeight > chainparams.GetConsensus().nLastPoW)) {
         pindex->nStatus |= BLOCK_FAILED_VALID;
         setDirtyBlockIndex.insert(pindex);
         return state.DoS(100, false, REJECT_INVALID, "bad-block-type", false, "proof of work wave is ended");      
