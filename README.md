@@ -14,3 +14,6 @@ GalaxyCash Official Development Repo
 * Documentation: 
 [GalaxyCash Wiki](https://github.com/galaxycash-dev/galaxycash/wiki)
 
+### Donate for development
+* 17pQka8TPKdrHf2rnaong5MRLRhmDdqP1G
+
