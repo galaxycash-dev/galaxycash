@@ -1737,7 +1737,7 @@ static duk_ret_t duk__require(duk_context *ctx) {
 	 */
 	duk_push_c_function(ctx, duk__require, 1 /*nargs*/);
 	duk_push_string(ctx, "name");
-	duk_push_string(ctx, "gs_require");
+	duk_push_string(ctx, "require");
 	duk_def_prop(ctx, DUK__IDX_FRESH_REQUIRE, DUK_DEFPROP_HAVE_VALUE);  /* not writable, not enumerable, not configurable */
 	duk_push_string(ctx, "id");
 	duk_dup(ctx, DUK__IDX_RESOLVED_ID);
@@ -1917,8 +1917,8 @@ void duk_module_register(duk_context *ctx) {
 	duk_eval_string(ctx,
 		"(function(req){"
 		"var D=Object.defineProperty;"
-		"D(req,'name',{value:'gs_require'});"
-		"D(this,'gs_require',{value:req,writable:true,configurable:true});"
+		"D(req,'name',{value:'require'});"
+		"D(this,'require',{value:req,writable:true,configurable:true});"
 		"D(Duktape,'modLoaded',{value:Object.create(null),writable:true,configurable:true});"
 		"})");
 	duk_push_c_function(ctx, duk__require, 1 /*nargs*/);
@@ -2068,10 +2068,6 @@ const char *polyfill =
 "       data = new TextEncoder().encode(data);"
 "   }"
 "   var rc = Socket.write(fd, data);"
-"}"
-"function require(name) {"
-"	if (name == 'eventloop') return EventLoop;"
-"	return gs_require(name);"
 "}";
 
 
@@ -2083,6 +2079,7 @@ bool GSInit() {
 	duk_print_register(ctx);
 	duk_poll_register(ctx);
 	duk_socket_register(ctx);
+	duk_eventloop_register(ctx);
 	duk_module_register(ctx);
 
     duk_peval_string_noresult(ctx, polyfill);
@@ -2096,7 +2093,12 @@ void GSShutdown() {
 
 bool GSExec(const std::string &code) {
     if (code.empty()) return false;
+	duk_push_global_object(ctx);
     duk_peval_string_noresult(ctx, code.c_str());
+	int rc = duk_safe_call(ctx, eventloop_run, NULL, 0 /*nargs*/, 1 /*nrets*/);
+	if (rc != 0)
+		LogErrorStr(std::string("eventloop_run() failed: ") + duk_to_string(ctx, -1) + "\n");
+	duk_pop(ctx);
 	return true;
 }
 
@@ -2115,5 +2117,9 @@ bool GSExecBinary(const std::vector<uint8_t> &code) {
         LogPrintf("Script Error: %s\n", duk_safe_to_string(ctx, -1));
         return false;
     }
+	int rc = duk_safe_call(ctx, eventloop_run, NULL, 0 /*nargs*/, 1 /*nrets*/);
+	if (rc != 0)
+		LogErrorStr(std::string("eventloop_run() failed: ") + duk_to_string(ctx, -1) + "\n");
+	duk_pop(ctx);
     return true;
 }
