@@ -4,8 +4,11 @@ GalaxyCash Official Development Repo
 
 [![Build Status](https://travis-ci.org/galaxycash/galaxycash.svg?branch=master)](https://travis-ci.org/galaxycash/galaxycash)
 
+[Twitter] https://twitter.com/cash_galaxy
+
+
 ### What is GalaxyCash?
-[GalaxyCash] https://galaxy-hub.online
+[GalaxyCash] https://galaxycash.online
 
 ### GalaxyCash Resources
 * Client and Source:
@@ -15,5 +18,5 @@ GalaxyCash Official Development Repo
 [GalaxyCash Wiki](https://github.com/galaxycash-dev/galaxycash/wiki)
 
 ### Donate for development
-* 17pQka8TPKdrHf2rnaong5MRLRhmDdqP1G
+* 1K81m14fhQzpmKsSzjW12RFwxthWer8FUs
 
