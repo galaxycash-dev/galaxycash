@@ -79,12 +79,12 @@ public:
 class GalaxyCashPoWWork {
 public:
     uint256 hashPrevBlock;
-    uint32_t nBits, nNonce;
+    uint32_t nBits, nNonce, nExtraNonce;
     int64_t nValue;
     std::vector<unsigned char> vchWorkSig;
 
-    GalaxyCashPoWWork() : nBits(0), nNonce(0), nValue(0) {}
-    GalaxyCashPoWWork(const GalaxyCashPoWWork &work) : hashPrevBlock(work.hashPrevWork), nBits(work.nBits), nNonce(work.nNonce), nValue(work.nValue), vchWorkSig(work.vchWorkSig) {}
+    GalaxyCashPoWWork() : nBits(0), nNonce(0), nExtraNonce(0), nValue(0) {}
+    GalaxyCashPoWWork(const GalaxyCashPoWWork &work) : hashPrevBlock(work.hashPrevBlock), nBits(work.nBits), nNonce(work.nNonce), nExtraNonce(work.nExtraNonce), nValue(work.nValue), vchWorkSig(work.vchWorkSig) {}
 
     ADD_SERIALIZE_METHODS;
 
@@ -94,6 +94,7 @@ public:
         READWRITE(hashPrevBlock);
         READWRITE(nBits);
         READWRITE(nNonce);
+        READWRITE(nExtraNonce);
         READWRITE(nValue);
         if (!(s.GetType() & SER_GETHASH)) READWRITE(vchWorkSig);
     }
@@ -105,6 +106,10 @@ public:
 class GalaxyCashDB : public CDBWrapper
 {
 public:
+    enum {
+        MAX_POWWORKS = 100
+    };
+
     GalaxyCashDB(size_t nCacheSize, bool fMemory = false, bool fWipe = false);
 
 
@@ -116,16 +121,10 @@ public:
     bool AccessTokenByName(const std::string& name, GalaxyCashToken& token);
     bool AccessTokenBySymbol(const std::string& symbol, GalaxyCashToken& token);
 
-    bool SetPoWWorkPrevDiff(const uint256 &hash, const uint32_t nBits);
-    bool GetPoWWorkPrevDiff(const uint256 &hash, uint32_t &nBits);
-    bool SetPoWWorkLastDiff(const uint256 &hash, const uint32_t nBits);
-    bool GetPoWWorkLastDiff(const uint256 &hash, uint32_t &nBits);
-    bool GetNextPoWWorkDiff(const uint256 &hash, uint32_t &nBits);
+    bool SetPoWWorks(const uint256 &hash, const std::vector<GalaxyCashPoWWork> &works);
+    bool GetPoWWorks(const uint256 &hash, std::vector<GalaxyCashPoWWork> &works);
 
-    bool SetPrevPoWWork(const uint256 &hash, const GalaxyCashPoWWork &work);
-    bool GetPrevPoWWork(cosnt uint256 &hash, GalaxyCashPoWWork &work);
-    bool SetLastPoWWork(const uint256 &hash, const GalaxyCashPoWWork &work);
-    bool GetLastPoWWork(cosnt uint256 &hash, GalaxyCashPoWWork &work);
+    bool GenerateNextPoWWork(const uint256 &hash, GalaxyCashPoWWork &work);
 };
 
 extern std::unique_ptr<GalaxyCashDB> pgdb;
