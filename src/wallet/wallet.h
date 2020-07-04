@@ -458,7 +458,7 @@ public:
         std::list<COutputEntry>& listSent,
         CAmount& nFee,
         std::string& strSentAccount,
-        const isminefilter& filter) const;
+        const isminefilter& filter, const uint256 &token = uint256()) const;
 
     bool IsFromMe(const isminefilter& filter) const
     {
@@ -854,12 +854,12 @@ public:
     /**
      * populate vCoins with vector of available COutputs.
      */
-    void AvailableCoins(std::vector<COutput>& vCoins, bool fOnlySafe = true, const CCoinControl* coinControl = nullptr, const CAmount& nMinimumAmount = 1, const CAmount& nMaximumAmount = MAX_MONEY, const CAmount& nMinimumSumAmount = MAX_MONEY, const uint64_t nMaximumCount = 0, const int nMinDepth = 0, const int nMaxDepth = 9999999, uint32_t nSpendTime = 0) const;
+    void AvailableCoins(const uint256 &token, std::vector<COutput>& vCoins, bool fOnlySafe = true, const CCoinControl* coinControl = nullptr, const CAmount& nMinimumAmount = 1, const CAmount& nMaximumAmount = MAX_MONEY, const CAmount& nMinimumSumAmount = MAX_MONEY, const uint64_t nMaximumCount = 0, const int nMinDepth = 0, const int nMaxDepth = 9999999, uint32_t nSpendTime = 0) const;
 
     /**
      * Return list of available coins and locked coins grouped by non-change output address.
      */
-    std::map<CTxDestination, std::vector<COutput>> ListCoins() const;
+    std::map<CTxDestination, std::vector<COutput>> ListCoins(const uint256 &token = uint256()) const;
 
     /**
      * Find non-change parent output.
@@ -970,15 +970,15 @@ public:
     void ResendWalletTransactions(int64_t nBestBlockTime, CConnman* connman) override;
     // ResendWalletTransactionsBefore may only be called if fBroadcastTransactions!
     std::vector<uint256> ResendWalletTransactionsBefore(int64_t nTime, CConnman* connman);
-    CAmount GetBalance() const;
+    CAmount GetBalance(const uint256 &token = uint256()) const;
     CAmount GetStake() const;
-    CAmount GetUnconfirmedBalance() const;
-    CAmount GetImmatureBalance() const;
-    CAmount GetWatchOnlyBalance() const;
-    CAmount GetUnconfirmedWatchOnlyBalance() const;
-    CAmount GetImmatureWatchOnlyBalance() const;
-    CAmount GetLegacyBalance(const isminefilter& filter, int minDepth, const std::string* account) const;
-    CAmount GetAvailableBalance(const CCoinControl* coinControl = nullptr) const;
+    CAmount GetUnconfirmedBalance(const uint256 &token = uint256()) const;
+    CAmount GetImmatureBalance(const uint256 &token = uint256()) const;
+    CAmount GetWatchOnlyBalance(const uint256 &token = uint256()) const;
+    CAmount GetUnconfirmedWatchOnlyBalance(const uint256 &token = uint256()) const;
+    CAmount GetImmatureWatchOnlyBalance(const uint256 &token = uint256()) const;
+    CAmount GetLegacyBalance(const isminefilter& filter, int minDepth, const std::string* account, const uint256 &token = uint256()) const;
+    CAmount GetAvailableBalance(const CCoinControl* coinControl = nullptr, const uint256 &token = uint256()) const;
 
     OutputType TransactionChangeType(OutputType change_type, const std::vector<CRecipient>& vecSend);
 

@@ -597,7 +597,7 @@ static UniValue getinfo_deprecated(const JSONRPCRequest& request)
 static UniValue runscript(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() < 1)
-        throw JSONRPCError(RPC_METHOD_NOT_FOUND,
+        throw std::runtime_error(
             "run \"filepath\"\n"
         );
 

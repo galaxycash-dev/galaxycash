@@ -190,7 +190,7 @@ static bool GetMasternodeVinAndKeys(CTxIn& txinRet, CPubKey& pubKeyRet, CKey& ke
     for (CWalletRef pwallet : vpwallets) {
         // Find possible candidates
         std::vector<COutput> vPossibleCoins;
-        pwallet->AvailableCoins(vPossibleCoins, true, NULL, collateral, collateral);
+        pwallet->AvailableCoins(uint256(), vPossibleCoins, true, NULL, collateral, collateral);
         if (vPossibleCoins.empty()) {
             LogPrintf("CWallet::GetMasternodeVinAndKeys -- Could not locate any valid masternode vin\n");
             continue;
@@ -1594,7 +1594,7 @@ std::vector<COutput> CActiveMasternode::SelectCoinsMasternode()
 
     {
         // Retrieve all possible outputs
-        pwallet->AvailableCoins(vCoins);
+        pwallet->AvailableCoins(uint256(), vCoins);
 
         // Lock MN coins from masternode.conf back if they where temporary unlocked
         if (!confLockedCoins.empty()) {
