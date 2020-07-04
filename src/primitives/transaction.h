@@ -227,6 +227,11 @@ inline void UnserializeTransaction(TxType& tx, Stream& s)
     s >> tx.vin;
     s >> tx.vout;
     s >> tx.nLockTime;
+
+    if (tx.nVersion > 2) {
+        s >> tx.token;
+        s >> tx.info;
+    }
 }
 
 template <typename Stream, typename TxType>
@@ -237,6 +242,10 @@ inline void SerializeTransaction(const TxType& tx, Stream& s)
     s << tx.vin;
     s << tx.vout;
     s << tx.nLockTime;
+    if (tx.nVersion > 2) {
+        s << tx.token;
+        s << tx.info;
+    }
 }
 
 /** The basic transaction that is broadcasted on the network and contained in
@@ -247,12 +256,14 @@ class CTransaction
 public:
     // Default transaction version.
     static const int32_t CURRENT_VERSION = 1; //ppcTODO - change this to 2 after BIP68 fork happens.
+    static const int32_t BASE_VERSION = 3;
+    static const int32_t TOKEN_VERSION = 4;
 
     // Changing the default transaction version requires a two step process: first
     // adapting relay policy by bumping MAX_STANDARD_VERSION, and then later date
     // bumping the default CURRENT_VERSION at which point both CURRENT_VERSION and
     // MAX_STANDARD_VERSION will be equal.
-    static const int32_t MAX_STANDARD_VERSION = 2;
+    static const int32_t MAX_STANDARD_VERSION = 4;
 
     // The local variables are made const to prevent unintended modification
     // without updating the cached hash value. However, CTransaction is not
@@ -261,6 +272,8 @@ public:
     // structure, including the hash.
     const std::vector<CTxIn> vin;
     const std::vector<CTxOut> vout;
+    const std::vector<unsigned char> info;
+    const uint256 token;
     const int32_t nVersion;
     const uint32_t nTime;
     const uint32_t nLockTime;
@@ -317,13 +330,32 @@ public:
 
     bool IsCoinBase() const
     {
-        return (vin.size() == 1 && vin[0].prevout.IsNull() && vout.size() >= 1);
+        return (nVersion < BASE_VERSION) && (vin.size() == 1 && vin[0].prevout.IsNull() && vout.size() >= 1);
+    }
+
+    bool IsTokenBase() const
+    {
+        return (nVersion == BASE_VERSION) && (vin.size() == 1 && vout.size() == 1 && !info.empty() && token.IsNull());
+    }
+
+    bool IsToken() const
+    {
+        return (nVersion == TOKEN_VERSION) && (vin.size() >= 1 && vout.size() >= 1 && !token.IsNull() && info.empty());
+    }
+
+    bool IsBurned() const
+    {
+        return (vin.size() >= 1 && vout.size() == 0);
+    }
+
+    uint256 Token() const {
+        return token;
     }
 
     bool IsCoinStake() const
     {
         // galaxycash: the coin stake transaction is marked with the first output empty
-        return (vin.size() > 0 && (!vin[0].prevout.IsNull()) && vout.size() >= 2 && vout[0].IsEmpty());
+        return (nVersion < BASE_VERSION) && (vin.size() > 0 && (!vin[0].prevout.IsNull()) && vout.size() >= 2 && vout[0].IsEmpty());
     }
 
     friend bool operator==(const CTransaction& a, const CTransaction& b)
@@ -343,6 +375,8 @@ public:
 struct CMutableTransaction {
     std::vector<CTxIn> vin;
     std::vector<CTxOut> vout;
+    uint256 token;
+    std::vector<unsigned char> info;
     int32_t nVersion;
     uint32_t nTime;
     uint32_t nLockTime;

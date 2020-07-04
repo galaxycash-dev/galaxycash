@@ -14,38 +14,54 @@
 #include <stdint.h>
 
 
-CGalaxyCashStateRef g_galaxycash;
 
-
-CGalaxyCashDB::CGalaxyCashDB(size_t nCacheSize, bool fMemory, bool fWipe) : CDBWrapper(GetDataDir() / "galaxycash" / "database", nCacheSize, fMemory, fWipe)
+GalaxyCashDB::GalaxyCashDB(size_t nCacheSize, bool fMemory, bool fWipe) : CDBWrapper(GetDataDir() / "galaxycash" / "database", nCacheSize, fMemory, fWipe)
 {
 }
 
 
-class CGalaxyCashVM
+bool GalaxyCashDB::AddToken(GalaxyCashToken& token)
 {
-public:
-    CGalaxyCashVM();
-    ~CGalaxyCashVM();
-};
+    uint256 hash = token.GetHash();
+    if (!Write(hash, token)) return false;
+    uint256 hash2 = SerializeHash(token.name + "-name");
+    if (!Write(hash2, hash)) return false;
+    hash2 = SerializeHash(token.symbol + "-symbol");
+    if (!Write(hash2, hash)) return false;
 
-CGalaxyCashVM::CGalaxyCashVM()
-{
-}
-
-CGalaxyCashState::CGalaxyCashState() : pdb(new CGalaxyCashDB((gArgs.GetArg("-gchdbcache", 128) << 20), false, gArgs.GetBoolArg("-reindex", false)))
-{
-}
-CGalaxyCashState::~CGalaxyCashState()
-{
-    delete pdb;
 }
 
-void CGalaxyCashState::EvalScript()
+void GalaxyCashDB::RemoveToken(const uint256 &hash)
 {
+    GalaxyCashToken token;
+    if (AccessToken(hash, token)) {
+        Erase(hash);
+        Erase(SerializeHash(token.name + "-name"));
+        Erase(SerializeHash(token.symbol + "-symbol"));
+    }
 }
 
-bool CGalaxyCashConsensus::CheckSignature() const
+bool GalaxyCashDB::AccessToken(const uint256 &hash, GalaxyCashToken& token)
 {
-    return true;
+    return Read(hash, token);
 }
+
+bool GalaxyCashDB::AccessTokenByName(const std::string &str, GalaxyCashToken& token)
+{
+    uint256 hash = SerializeHash(str + "-name");
+    return Read(hash, token);
+}
+
+bool GalaxyCashDB::AccessTokenBySymbol(const std::string &str, GalaxyCashToken& token)
+{
+    uint256 hash = SerializeHash(str + "-symbol");
+    return Read(hash, token);
+}
+
+bool GalaxyCashDB::HaveToken(const uint256 &hash)
+{
+    return db.Exists(hash);
+}
+
+
+GalaxyCashDB *pgdb = nullptr;

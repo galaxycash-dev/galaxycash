@@ -92,11 +92,18 @@ void AddCoins(CCoinsViewCache& cache, const CTransaction& tx, int nHeight, bool 
 {
     bool fCoinbase = tx.IsCoinBase();
     const uint256& txid = tx.GetHash();
+    uint256 token;
+    if (tx.IsTokenBase()) {
+        CDataStream s(tx.info.begin(), tx.info.end(), SER_NETWORK, PROTOCOL_VERSION);
+        GalaxyCashToken t; s >> t; token = t.GetHash();
+    } else {
+        token = tx.token;
+    }
     for (size_t i = 0; i < tx.vout.size(); ++i) {
         bool overwrite = check ? cache.HaveCoin(COutPoint(txid, i)) : fCoinbase;
         // Always set the possible_overwrite flag to AddCoin for coinbase txn, in order to correctly
         // deal with the pre-BIP30 occurrences of duplicate coinbase transactions.
-        cache.AddCoin(COutPoint(txid, i), Coin(tx.vout[i], nHeight, fCoinbase, tx.IsCoinStake(), tx.nTime), overwrite);
+        cache.AddCoin(COutPoint(txid, i), Coin(tx.vout[i], nHeight, fCoinbase, tx.IsCoinStake(), tx.TokenBase(), tx.nTime, token), overwrite);
     }
 }
 
@@ -118,6 +125,7 @@ bool CCoinsViewCache::SpendCoin(const COutPoint& outpoint, Coin* moveout)
 }
 
 static const Coin coinEmpty;
+static const GalaxyCashToken tokenEmpty;
 
 const Coin& CCoinsViewCache::AccessCoin(const COutPoint& outpoint) const
 {

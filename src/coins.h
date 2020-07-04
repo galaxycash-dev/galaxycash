@@ -20,6 +20,7 @@
 
 #include <unordered_map>
 
+
 /**
  * A UTXO entry.
  *
@@ -42,12 +43,19 @@ public:
     // galaxycash: whether transaction is a coinstake
     bool fCoinStake;
 
+    // galaxycash: whether transaction is a coinstake
+    bool fTokenBase;
+
     // galaxycash: transaction timestamp
     unsigned int nTime;
 
+    // galaxycash: token id
+    uint256 token;
+
+
     //! construct a Coin from a CTxOut and height/coinbase information.
-    Coin(CTxOut&& outIn, int nHeightIn, bool fCoinBaseIn, bool fCoinStakeIn, int nTimeIn) : out(std::move(outIn)), fCoinBase(fCoinBaseIn), nHeight(nHeightIn), fCoinStake(fCoinStakeIn), nTime(nTimeIn) {}
-    Coin(const CTxOut& outIn, int nHeightIn, bool fCoinBaseIn, bool fCoinStakeIn, int nTimeIn) : out(outIn), fCoinBase(fCoinBaseIn), nHeight(nHeightIn), fCoinStake(fCoinStakeIn), nTime(nTimeIn) {}
+    Coin(CTxOut&& outIn, int nHeightIn, bool fCoinBaseIn, bool fCoinStakeIn, bool fTokenBaseIn, int nTimeIn, const uint256 &token) : out(std::move(outIn)), fCoinBase(fCoinBaseIn), nHeight(nHeightIn), fCoinStake(fCoinStakeIn), fTokenBase(fTokenBaseIn), nTime(nTimeIn), token(token) {}
+    Coin(const CTxOut& outIn, int nHeightIn, bool fCoinBaseIn, bool fCoinStakeIn, bool fTokenBaseIn, int nTimeIn, const uint256 &token) : out(outIn), fCoinBase(fCoinBaseIn), nHeight(nHeightIn), fCoinStake(fCoinStakeIn), fTokenBase(fTokenBaseIn), nTime(nTimeIn), token(token) {}
 
     void Clear()
     {
@@ -56,10 +64,12 @@ public:
         nHeight = 0;
         fCoinStake = false;
         nTime = 0;
+        fTokenBase = false;
+        token.SetNull();
     }
 
     //! empty constructor
-    Coin() : fCoinBase(false), nHeight(0), fCoinStake(false), nTime(0) {}
+    Coin() : fCoinBase(false), nHeight(0), fCoinStake(false), fTokenBase(false), nTime(0) {}
 
     bool IsCoinBase() const
     {
@@ -71,6 +81,14 @@ public:
         return fCoinStake;
     }
 
+    bool IsTokenBase() const {
+        return fTokenBase;
+    }
+
+    bool IsToken() const {
+        return !token.IsNull();
+    }
+
     template <typename Stream>
     void Serialize(Stream& s) const
     {
@@ -79,10 +97,14 @@ public:
         ::Serialize(s, VARINT(code));
         ::Serialize(s, CTxOutCompressor(REF(out)));
         // galaxycash flags
-        unsigned int nFlag = fCoinStake ? 1 : 0;
+        unsigned int nFlag = 0;
+        if (fCoinStake) nFlag |= (1 << 0);
+        if (fTokenBase) nFlag |= (1 << 1);
+        if (!token.IsNull()) nFlag |= (1 << 2);
         ::Serialize(s, VARINT(nFlag));
         // galaxycash transaction timestamp
         ::Serialize(s, VARINT(nTime));
+        if (fTokenBase && !token.IsNull()) ::Serialize(s, token);
     }
 
     template <typename Stream>
@@ -96,9 +118,12 @@ public:
         // galaxycash flags
         unsigned int nFlag = 0;
         ::Unserialize(s, VARINT(nFlag));
-        fCoinStake = nFlag & 1;
+        fCoinStake = nFlag & (1 << 0);
+        fTokenBase = nFlag & (1 << 1);
         // galaxycash transaction timestamp
         ::Unserialize(s, VARINT(nTime));
+        if (fTokenBase && nFlag & (1 << 2)) ::Unserialize(s, token);
+        else token.SetNull();
     }
 
     bool IsSpent() const
@@ -151,6 +176,7 @@ struct CCoinsCacheEntry {
 };
 
 typedef std::unordered_map<COutPoint, CCoinsCacheEntry, SaltedOutpointHasher> CCoinsMap;
+typedef std::map<uint256, GalaxyCashToken> CTokensMap;
 
 /** Cursor for iterating over CoinsView state */
 class CCoinsViewCursor
@@ -239,6 +265,7 @@ protected:
      */
     mutable uint256 hashBlock;
     mutable CCoinsMap cacheCoins;
+    mutable CTokensMap cacheTokens;
 
     /* Cached dynamic memory usage for the inner Coin objects. */
     mutable size_t cachedCoinsUsage;

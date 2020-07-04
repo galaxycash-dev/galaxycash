@@ -256,6 +256,8 @@ public:
 
     const uint256& GetHash() const { return tx->GetHash(); }
     bool IsCoinBase() const { return tx->IsCoinBase(); }
+    bool IsTokenBase() const { return tx->IsTokenBase(); }
+    bool IsToken() const { return tx->IsToken(); }
     bool IsCoinStake() const { return tx->IsCoinStake(); }
 };
 
@@ -823,6 +825,7 @@ public:
     }
 
     std::map<uint256, CWalletTx> mapWallet;
+    std::map<std::pair<uint256,uint256>, CWalletTx> mapTokenWallet;
     std::list<CAccountingEntry> laccentries;
 
     typedef std::pair<CWalletTx*, CAccountingEntry*> TxPair;
@@ -837,6 +840,7 @@ public:
     std::set<COutPoint> setLockedCoins;
 
     const CWalletTx* GetWalletTx(const uint256& hash) const;
+    const CWalletTx* GetTokenWalletTx(const uint256& hash) const;
 
     //! check whether we are allowed to upgrade (or already support) to the named feature
     bool CanSupportFeature(enum WalletFeature wf) const

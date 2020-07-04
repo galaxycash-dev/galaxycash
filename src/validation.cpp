@@ -1201,7 +1201,8 @@ bool CheckInputs(const CTransaction& tx, CValidationState& state, const CCoinsVi
                 const COutPoint& prevout = tx.vin[i].prevout;
                 const Coin& coin = inputs.AccessCoin(prevout);
                 assert(!coin.IsSpent());
-
+                if (!coin.fTokenBase && coin.token != tx.Token()) return state.DoS(100, false, REJECT_INVALID, strprintf("bad input"));
+                if (coin.fTokenBase && !coin.token.IsNull()) return state.DoS(100, false, REJECT_INVALID, strprintf("bad input"));
 
                 // Verify signature
                 CScriptCheck check(coin.out, tx, i, flags, cacheSigStore, &txdata);
@@ -1344,6 +1345,8 @@ int ApplyTxInUndo(Coin&& undo, CCoinsViewCache& view, const COutPoint& out)
             undo.nHeight = alternate.nHeight;
             undo.fCoinBase = alternate.fCoinBase;
             undo.fCoinStake = alternate.fCoinStake; // galaxycash
+            undo.fTokenBase = alternate.fTokenBase; // galaxycash
+            undo.token = alternate.token;
             undo.nTime = alternate.nTime;           // galaxycash
         } else {
             return DISCONNECT_FAILED; // adding output for transaction without known metadata
@@ -1381,6 +1384,7 @@ DisconnectResult CChainState::DisconnectBlock(const CBlock& block, const CBlockI
         uint256 hash = tx.GetHash();
         bool is_coinbase = tx.IsCoinBase();
         bool is_coinstake = tx.IsCoinStake();
+        bool is_tokenbase = tx.IsTokenBase();
 
         // Check that all outputs are available and match the outputs in the block itself
         // exactly.
@@ -1389,10 +1393,16 @@ DisconnectResult CChainState::DisconnectBlock(const CBlock& block, const CBlockI
                 COutPoint out(hash, o);
                 Coin coin;
                 bool is_spent = view.SpendCoin(out, &coin);
-                if (!is_spent || tx.vout[o] != coin.out || pindex->nHeight != coin.nHeight || is_coinbase != coin.fCoinBase || is_coinstake != coin.fCoinStake) {
+                if (!is_spent || tx.vout[o] != coin.out || pindex->nHeight != coin.nHeight || is_coinbase != coin.fCoinBase || is_coinstake != coin.fCoinStake  || is_tokenbase != coin.fTokenBase) {
                     fClean = false; // transaction output mismatch
                 }
             }
+        }
+
+        if (tx.IsTokenBase()) {
+            CDataStream s(tx.info.begin(), tx.info.end(), SER_NETWORK, PROTOCOL_VERSION);
+            GalaxyCashToken token; s >> token;
+            pgdb->RemoveToken(token.GetHash());
         }
 
         // restore inputs
@@ -1640,6 +1650,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     std::vector<int> prevheights;
     CAmount nFees = 0;
     CAmount nReward = 0;
+    int64_t nBurned = 0;
     int64_t nValueIn = 0;
     int64_t nValueOut = 0;
     int nInputs = 0;
@@ -1649,6 +1660,12 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     txdata.reserve(block.vtx.size()); // Required so that pointers to individual PrecomputedTransactionData don't get invalidated
     for (unsigned int i = 0; i < block.vtx.size(); i++) {
         const CTransaction& tx = *(block.vtx[i]);
+
+        if (tx.IsTokenBase()) {
+            CDataStream s(tx.info.begin(), tx.info.end(), SER_NETWORK, PROTOCOL_VERSION);
+            GalaxyCashToken token; s >> token;
+            pgdb->AddToken(token);
+        }
 
         nInputs += tx.vin.size();
 
@@ -1663,13 +1680,16 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
             int64_t nValueA = view.GetValueIn(tx);
             int64_t nValueB = tx.GetValueOut();
 
-            nValueIn += nValueA;
-            nValueOut += nValueB;
+            nValueIn += tx.IsBurned() ? 0 : nValueA;
+            nValueOut += tx.IsBurned() ? 0 : nValueB;
 
             if (!tx.IsCoinStake())
                 nFees += txfee;
             if (tx.IsCoinStake())
                 nReward = nValueOut - nValueIn;
+
+            if (tx.IsBurned())
+                nBurned += nValueA;
 
             if (!MoneyRange(nFees)) {
                 return state.DoS(100, error("%s: accumulated fee in the block out of range.", __func__),
@@ -1743,7 +1763,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
 
     // galaxycash: track money supply and mint amount info
     pindex->nMint = nValueOut - nValueIn + nFees;
-    pindex->nMoneySupply = (pindex->pprev ? pindex->pprev->nMoneySupply : 0) + nValueOut - nValueIn;
+    pindex->nMoneySupply = (pindex->pprev ? pindex->pprev->nMoneySupply : 0) + nValueOut - nValueIn - nBurned;
 
     // galaxycash: fees are not collected by miners as in galaxycash
     // galaxycash: fees are destroyed to compensate the entire network

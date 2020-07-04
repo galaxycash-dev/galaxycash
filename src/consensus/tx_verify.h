@@ -15,6 +15,9 @@ class CCoinsViewCache;
 class CTransaction;
 class CValidationState;
 
+
+
+
 /** Transaction validation functions */
 
 /** Context-independent validity checks */
@@ -81,6 +84,6 @@ bool SequenceLocks(const CTransaction &tx, int flags, std::vector<int>* prevHeig
 
 // galaxycash: minimum fee for transaction to be accepted in a blockchain.
 CAmount GetMinFee(const CTransaction& tx);
-CAmount GetMinFee(size_t nBytes, uint32_t nTime);
+CAmount GetMinFee(size_t nBytes, uint32_t nTime, const bool fToken = false);
 
 #endif // BITCOIN_CONSENSUS_TX_VERIFY_H
