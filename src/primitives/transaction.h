@@ -231,7 +231,7 @@ inline void UnserializeTransaction(TxType& tx, Stream& s)
     s >> tx.vout;
     s >> tx.nLockTime;
 
-    if (s.GetType() & SER_GALAXYCASH_ECO) {
+    if (s.GetVersion() >= TX_BASE_VERSION && s.GetType() & SER_GALAXYCASH_ECO) {
         s >> tx.token;
         s >> tx.info;
     } else {
@@ -248,7 +248,7 @@ inline void SerializeTransaction(const TxType& tx, Stream& s)
     s << tx.vin;
     s << tx.vout;
     s << tx.nLockTime;
-    if (!(s.GetType() & SER_GETHASH) && (s.GetType() & SER_GALAXYCASH_ECO)) {
+    if (!(s.GetType() & SER_GETHASH) && s.GetVersion() >= TX_BASE_VERSION && (s.GetType() & SER_GALAXYCASH_ECO)) {
         s << tx.token;
         s << tx.info;
     }

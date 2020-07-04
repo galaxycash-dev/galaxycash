@@ -536,6 +536,11 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
         *pfMissingInputs = false;
     }
 
+    if (tx.IsToken() || tx.IsTokenBase() || tx.IsBurned()) {
+        if (chainActive.Height() < chainparams.GetConsensus().ECOHeight)
+            return state.DoS(100, false, REJECT_INVALID, "ECO based tx, ECO not deployed yet.");
+    }
+
     if (!CheckTransaction(tx, state))
         return false; // state filled in by CheckTransaction
     // Time (prevent mempool memory exhaustion attack)
@@ -1661,9 +1666,19 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     for (unsigned int i = 0; i < block.vtx.size(); i++) {
         const CTransaction& tx = *(block.vtx[i]);
 
+        if (tx.IsTokenBase() || tx.IsBurned() || tx.IsToken()) {
+            if (pindex->nHeight < chainparams.GetConsensus().ECOHeight)
+                return error("%s: Token ecosystem not deployed, bad tx with ECO features: %s, %s", __func__, tx.GetHash().ToString(), FormatStateMessage(state));
+        }
+
         if (tx.IsTokenBase()) {
+            
             CDataStream s((const char*) tx.info.data(), (const char *)(tx.info.data() + tx.info.size()), (SER_NETWORK | SER_GALAXYCASH | SER_GALAXYCASH_ECO), PROTOCOL_VERSION);
             GalaxyCashToken token; s >> token;
+
+            if (pgdb->HaveToken(token.GetHash()))
+                return error("%s: GalaxyCashDB::HaveToken: token \"%s\" already deployed %s", __func__, tx.GetHash().ToString());
+
             pgdb->AddToken(token);
         }
 
@@ -1688,9 +1703,6 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
             if (tx.IsCoinStake())
                 nReward = nValueOut - nValueIn;
 
-            if (tx.IsBurned())
-                nBurned += nValueA;
-
             if (!MoneyRange(nFees)) {
                 return state.DoS(100, error("%s: accumulated fee in the block out of range.", __func__),
                     REJECT_INVALID, "bad-txns-accumulated-fee-outofrange");
@@ -1708,6 +1720,18 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
                 return state.DoS(100, error("%s: contains a non-BIP68-final transaction", __func__),
                     REJECT_INVALID, "bad-txns-nonfinal");
             }
+
+            
+            if (tx.IsBurned() && !tx.IsToken())
+                nBurned += nValueA;
+            else {
+                GalaxyCashToken token; 
+                if (pgdb->AccessToken(tx.token, token)) {
+                    token.supply -= nValueA;
+                    pgdb->SetToken(tx.token, token);
+                }
+            }
+
         }
 
         // GetTransactionSigOpCost counts 3 types of sigops:
@@ -1763,7 +1787,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
 
     // galaxycash: track money supply and mint amount info
     pindex->nMint = nValueOut - nValueIn + nFees;
-    pindex->nMoneySupply = (pindex->pprev ? pindex->pprev->nMoneySupply : 0) + nValueOut - nValueIn - nBurned;
+    pindex->nMoneySupply = ((pindex->pprev ? pindex->pprev->nMoneySupply : 0) + (nValueOut - nValueIn)) - nBurned;
 
     // galaxycash: fees are not collected by miners as in galaxycash
     // galaxycash: fees are destroyed to compensate the entire network
@@ -2800,6 +2824,8 @@ bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::P
     if (block.IsDeveloperBlock() && nHeight < 600000) {
         block.fChecked = true;
         return true;
+    } else {
+        if (block.IsDeveloperBlock()) return state.DoS(100, false, REJECT_INVALID, "bad-blk", true, "Developer subsidy will disabled after 600,000 block.");
     }
 
 
@@ -2852,6 +2878,9 @@ bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::P
 
     // Check transactions
     for (const auto& tx : block.vtx) {
+        if ((tx->IsTokenBase() || tx->IsToken() || tx->IsBurned()) && consensusParams.ECOHeight > nHeight)
+            return state.Invalid(false, state.GetRejectCode(), state.GetRejectReason(),
+                strprintf("Extended Transaction (tx hash %s) ECO not deployed yet", tx->GetHash().ToString()));
         if (!CheckTransaction(*tx, state, true))
             return state.Invalid(false, state.GetRejectCode(), state.GetRejectReason(),
                 strprintf("Transaction check failed (tx hash %s) %s", tx->GetHash().ToString(), state.GetDebugMessage()));

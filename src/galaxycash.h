@@ -46,7 +46,7 @@ public:
     {
         READWRITE(name);
         READWRITE(symbol);
-        READWRITE(supply);
+        if (!(s.GetType() & SER_GETHASH)) READWRITE(supply);
     }
 
     GalaxyCashToken() : supply(0) { }
@@ -81,7 +81,8 @@ public:
     GalaxyCashDB(size_t nCacheSize, bool fMemory = false, bool fWipe = false);
 
 
-    bool AddToken(const GalaxyCashToken& token);
+    bool AddToken(const GalaxyCashToken &token);
+    bool SetToken(const uint256 &hash, const GalaxyCashToken &token);
     bool RemoveToken(const uint256 &hash);
     bool AccessToken(const uint256 &hash, GalaxyCashToken& token);
     bool HaveToken(const uint256 &hash);

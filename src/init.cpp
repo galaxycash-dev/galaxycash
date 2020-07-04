@@ -532,8 +532,8 @@ std::string HelpMessage(HelpMessageMode mode)
 
 std::string LicenseInfo()
 {
-    const std::string URL_SOURCE_CODE = "<https://github.com/galaxycash/galaxycash>";
-    const std::string URL_WEBSITE = "<https://galaxy-hub.online/>";
+    const std::string URL_SOURCE_CODE = "<https://github.com/galaxycash-dev/galaxycash>";
+    const std::string URL_WEBSITE = "<https://galaxycash.online/>";
 
     return CopyrightHolders(strprintf(_("Copyright (C) %i-%i"), 2012, COPYRIGHT_YEAR) + " ") + "\n" +
            "\n" +

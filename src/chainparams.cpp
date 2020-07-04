@@ -103,7 +103,9 @@ public:
         consensus.BIP16Height = 0;
         consensus.BIP34Height = 1;
         consensus.BIP34Hash = uint256S("0x000002e5d366c89b16195d618462f5ad14f8bbfaf39a93f2593c2ceb67d94c16");
-        consensus.powLimit = uint256S("0x00000fffff000000000000000000000000000000000000000000000000000000");                                                                                                            // ~arith_uint256(0) >> 32;
+        consensus.powLimit = uint256S("0x00000fffff000000000000000000000000000000000000000000000000000000");      
+        
+        consensus.ECOHeight = 685000;                                                                                                      // ~arith_uint256(0) >> 32;
 
         // POS
         consensus.stakeLimit = uint256S("0x00000fffff000000000000000000000000000000000000000000000000000000");
@@ -217,6 +219,8 @@ public:
     {
         strNetworkID = "test";
 
+        consensus.ECOHeight = 0;    
+
         consensus.nLastPoW = 130000;
         consensus.nSubsidyHalvingInterval = 210000;
 
@@ -296,6 +300,7 @@ public:
         consensus.BIP16Height = 0;         // always enforce P2SH BIP16 on regtest
         consensus.BIP34Height = 100000000; // BIP34 has not activated on regtest (far in the future so block v1 are not rejected in tests)
         consensus.BIP34Hash = uint256();
+        consensus.ECOHeight = 0;    
         consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");            // ~arith_uint256(0) >> 28;
 
         consensus.nTargetTimespan = 7 * 24 * 60 * 60;                         // two weeks

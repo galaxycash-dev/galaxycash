@@ -770,7 +770,7 @@ void BitcoinGUI::openChatroom()
 
 void BitcoinGUI::openForum()
 {
-    QDesktopServices::openUrl(QUrl("https://galaxy-hub.online/forum/home"));
+    QDesktopServices::openUrl(QUrl("https://galaxycash.online/forum/home"));
 }
 
 #endif // ENABLE_WALLET

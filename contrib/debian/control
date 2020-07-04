@@ -25,9 +25,9 @@ Build-Depends: debhelper,
  python,
  libzmq3-dev
 Standards-Version: 3.9.2
-Homepage: https://galaxy-hub.online/
-Vcs-Git: git://github.com/galaxycash/galaxycash.git
-Vcs-Browser: https://github.com/galaxycash/galaxycash
+Homepage: https://galaxycash.online/
+Vcs-Git: git://github.com/galaxycash-dev/galaxycash.git
+Vcs-Browser: https://github.com/galaxycash-dev/galaxycash
 
 Package: galaxycashd
 Architecture: any
