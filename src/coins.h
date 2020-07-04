@@ -104,7 +104,7 @@ public:
         ::Serialize(s, VARINT(nFlag));
         // galaxycash transaction timestamp
         ::Serialize(s, VARINT(nTime));
-        if (fTokenBase && !token.IsNull()) ::Serialize(s, token);
+        if (!token.IsNull()) ::Serialize(s, token);
     }
 
     template <typename Stream>
@@ -122,7 +122,7 @@ public:
         fTokenBase = nFlag & (1 << 1);
         // galaxycash transaction timestamp
         ::Unserialize(s, VARINT(nTime));
-        if (fTokenBase && nFlag & (1 << 2)) ::Unserialize(s, token);
+        if (nFlag & (1 << 2)) ::Unserialize(s, token);
         else token.SetNull();
     }
 

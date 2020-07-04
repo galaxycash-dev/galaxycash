@@ -393,6 +393,8 @@ public:
         ::Unserialize(s, VARINT(nHeight));
 
         ::Unserialize(s, fTokenBase);
+
+        ::Unserialize(s, token);
     }
 };
 
