@@ -71,6 +71,7 @@
 #include <zmq/zmqnotificationinterface.h>
 #endif
 
+#include <galaxycash.h>
 #include <galaxyscript.h>
 
 static const bool DEFAULT_PROXYRANDOMIZE = true;
@@ -260,6 +261,7 @@ void Shutdown()
         pcoinscatcher.reset();
         pcoinsdbview.reset();
         pblocktree.reset();
+        pgdb.reset();
     }
 #ifdef ENABLE_WALLET
     StopWallets();
@@ -1313,6 +1315,8 @@ bool AppInitMain()
                     pblocktree->WriteReindexing(true);
 
                 if (fRequestShutdown) break;
+
+                pgdb.reset(new GalaxyCashDB(nCoinDBCache, false, fReset || fReindexChainState));
 
                 // LoadBlockIndex will load fTxIndex from the db, or set it if
                 // we're reindexing.

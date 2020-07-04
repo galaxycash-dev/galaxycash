@@ -223,7 +223,7 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
 
         }
 
-        if (!tx.IsTokenBase() && tx.Token() != coin.token)
+        if (!tx.IsTokenBase() && tx.token != coin.token)
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-inputs-tokenbadin", false, strprintf("%s: inputs not in token chain", __func__));
 
         // If prev is coinbase, check that it's matured

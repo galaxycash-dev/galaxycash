@@ -193,7 +193,9 @@ public:
             {450000, uint256S("0xae77be762ec79fc75e4be9ad2c61f1cc477738b4d3b9bf568ae16208e254598e")},
             {466000, uint256S("0x9a4004b1327ae419b54cf9afa360b0aece7abe21a5a01860f3e131afde31c037")},
             {480000, uint256S("0xcdd2849b2781eaedaa6273a2ebd56c8827435e2d85f93861a9b50493ecf143ca")},
-            {490000, uint256S("0xf9652d83e27d0e6bfc3e18894bdfb411013b9dc587b771b3579510b6de36d632")}}};
+            {490000, uint256S("0xf9652d83e27d0e6bfc3e18894bdfb411013b9dc587b771b3579510b6de36d632")},
+            {500000, uint256S("0x570eed621d4ad90c6e71abaf4ffe66f24e768c2c8e0e11d1fb83f2d0a1c2f224")},
+            {600000, uint256S("0xc1d6692b528e5e6e4ba2548861e1af5d7ded44901280a2fcb42f442425f057d3")}}};
 
 
         chainTxData = ChainTxData{

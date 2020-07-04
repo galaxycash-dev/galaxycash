@@ -88,6 +88,7 @@ public:
     bool AccessTokenByName(const std::string& name, GalaxyCashToken& token);
     bool AccessTokenBySymbol(const std::string& symbol, GalaxyCashToken& token);
 };
-extern GalaxyCashDB *pgdb;
+
+extern std::unique_ptr<GalaxyCashDB> pgdb;
 
 #endif

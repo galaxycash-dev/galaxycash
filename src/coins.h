@@ -43,9 +43,6 @@ public:
     // galaxycash: whether transaction is a coinstake
     bool fCoinStake;
 
-    // galaxycash: whether transaction is a coinstake
-    bool fTokenBase;
-
     // galaxycash: transaction timestamp
     unsigned int nTime;
 
@@ -54,8 +51,8 @@ public:
 
 
     //! construct a Coin from a CTxOut and height/coinbase information.
-    Coin(CTxOut&& outIn, int nHeightIn, bool fCoinBaseIn, bool fCoinStakeIn, bool fTokenBaseIn, int nTimeIn, const uint256 &token) : out(std::move(outIn)), fCoinBase(fCoinBaseIn), nHeight(nHeightIn), fCoinStake(fCoinStakeIn), fTokenBase(fTokenBaseIn), nTime(nTimeIn), token(token) {}
-    Coin(const CTxOut& outIn, int nHeightIn, bool fCoinBaseIn, bool fCoinStakeIn, bool fTokenBaseIn, int nTimeIn, const uint256 &token) : out(outIn), fCoinBase(fCoinBaseIn), nHeight(nHeightIn), fCoinStake(fCoinStakeIn), fTokenBase(fTokenBaseIn), nTime(nTimeIn), token(token) {}
+    Coin(CTxOut&& outIn, int nHeightIn, bool fCoinBaseIn, bool fCoinStakeIn, int nTimeIn, const uint256 &token) : out(std::move(outIn)), fCoinBase(fCoinBaseIn), nHeight(nHeightIn), fCoinStake(fCoinStakeIn), nTime(nTimeIn), token(token) {}
+    Coin(const CTxOut& outIn, int nHeightIn, bool fCoinBaseIn, bool fCoinStakeIn, int nTimeIn, const uint256 &token) : out(outIn), fCoinBase(fCoinBaseIn), nHeight(nHeightIn), fCoinStake(fCoinStakeIn), nTime(nTimeIn), token(token) {}
 
     void Clear()
     {
@@ -64,12 +61,11 @@ public:
         nHeight = 0;
         fCoinStake = false;
         nTime = 0;
-        fTokenBase = false;
         token.SetNull();
     }
 
     //! empty constructor
-    Coin() : fCoinBase(false), nHeight(0), fCoinStake(false), fTokenBase(false), nTime(0) {}
+    Coin() : fCoinBase(false), nHeight(0), fCoinStake(false), nTime(0) {}
 
     bool IsCoinBase() const
     {
@@ -79,10 +75,6 @@ public:
     bool IsCoinStake() const
     { // galaxycash: coinstake
         return fCoinStake;
-    }
-
-    bool IsTokenBase() const {
-        return fTokenBase;
     }
 
     bool IsToken() const {
@@ -99,12 +91,10 @@ public:
         // galaxycash flags
         unsigned int nFlag = 0;
         if (fCoinStake) nFlag |= (1 << 0);
-        if (fTokenBase) nFlag |= (1 << 1);
-        if (!token.IsNull()) nFlag |= (1 << 2);
         ::Serialize(s, VARINT(nFlag));
         // galaxycash transaction timestamp
         ::Serialize(s, VARINT(nTime));
-        if (!token.IsNull()) ::Serialize(s, token);
+        ::Serialize(s, token);
     }
 
     template <typename Stream>
@@ -119,11 +109,9 @@ public:
         unsigned int nFlag = 0;
         ::Unserialize(s, VARINT(nFlag));
         fCoinStake = nFlag & (1 << 0);
-        fTokenBase = nFlag & (1 << 1);
         // galaxycash transaction timestamp
         ::Unserialize(s, VARINT(nTime));
-        if (nFlag & (1 << 2)) ::Unserialize(s, token);
-        else token.SetNull();
+        ::Unserialize(s, token);
     }
 
     bool IsSpent() const

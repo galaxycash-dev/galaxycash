@@ -201,6 +201,9 @@ public:
 
 struct CMutableTransaction;
 
+static const int32_t TX_BASE_VERSION = 4;
+static const int32_t TX_TOKEN_VERSION = 5;
+
 /**
  * Basic transaction serialization format:
  * - int32_t nVersion
@@ -228,11 +231,11 @@ inline void UnserializeTransaction(TxType& tx, Stream& s)
     s >> tx.vout;
     s >> tx.nLockTime;
 
-    if (tx.nVersion > 2) {
+    if (s.GetType() & SER_GALAXYCASH_ECO) {
         s >> tx.token;
         s >> tx.info;
     } else {
-        tx.token = uint256();
+        tx.token.SetNull();
         tx.info.clear();
     }
 }
@@ -245,7 +248,7 @@ inline void SerializeTransaction(const TxType& tx, Stream& s)
     s << tx.vin;
     s << tx.vout;
     s << tx.nLockTime;
-    if (tx.nVersion > 2) {
+    if (!(s.GetType() & SER_GETHASH) && (s.GetType() & SER_GALAXYCASH_ECO)) {
         s << tx.token;
         s << tx.info;
     }
@@ -259,14 +262,13 @@ class CTransaction
 public:
     // Default transaction version.
     static const int32_t CURRENT_VERSION = 1; //ppcTODO - change this to 2 after BIP68 fork happens.
-    static const int32_t BASE_VERSION = 3;
-    static const int32_t TOKEN_VERSION = 4;
+
 
     // Changing the default transaction version requires a two step process: first
     // adapting relay policy by bumping MAX_STANDARD_VERSION, and then later date
     // bumping the default CURRENT_VERSION at which point both CURRENT_VERSION and
     // MAX_STANDARD_VERSION will be equal.
-    static const int32_t MAX_STANDARD_VERSION = 4;
+    static const int32_t MAX_STANDARD_VERSION = 5;
 
     // The local variables are made const to prevent unintended modification
     // without updating the cached hash value. However, CTransaction is not
@@ -333,32 +335,32 @@ public:
 
     bool IsCoinBase() const
     {
-        return (nVersion < BASE_VERSION) && (vin.size() == 1 && vin[0].prevout.IsNull() && vout.size() >= 1);
+        return (vin.size() == 1 && vin[0].prevout.IsNull() && vout.size() >= 1 && token.IsNull() && info.empty());
     }
 
     bool IsTokenBase() const
     {
-        return (nVersion == BASE_VERSION) && (vin.size() == 1 && vout.size() == 1 && !info.empty() && token.IsNull());
+        return (vin.size() == 1 && vout.size() == 1 && !token.IsNull() && !info.empty());
     }
 
     bool IsToken() const
     {
-        return (nVersion == TOKEN_VERSION) && (vin.size() >= 1 && vout.size() >= 1 && !token.IsNull() && info.empty());
+        return (vin.size() >= 1 && (vout.size() >= 1 || vout.size() == 0) && !token.IsNull() && info.empty());
     }
 
     bool IsBurned() const
     {
-        return (vin.size() >= 1 && vout.size() == 0);
+        return (vin.size() >= 1 && vout.size() == 0 && info.empty());
     }
 
-    uint256 Token() const {
+    uint256 GetToken() const {
         return token;
     }
 
     bool IsCoinStake() const
     {
         // galaxycash: the coin stake transaction is marked with the first output empty
-        return (nVersion < BASE_VERSION) && (vin.size() > 0 && (!vin[0].prevout.IsNull()) && vout.size() >= 2 && vout[0].IsEmpty());
+        return (vin.size() > 0 && (!vin[0].prevout.IsNull()) && vout.size() >= 2 && vout[0].IsEmpty()  && token.IsNull() && info.empty());
     }
 
     friend bool operator==(const CTransaction& a, const CTransaction& b)

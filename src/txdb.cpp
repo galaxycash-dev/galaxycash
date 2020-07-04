@@ -346,9 +346,6 @@ public:
     // galaxycash: whether transaction is a coinstake
     bool fCoinStake;
 
-    // galaxycash: whether transaction is a tokenbase
-    bool fTokenBase;
-
     // galaxycash: transaction timestamp
     unsigned int nTime;
 
@@ -356,7 +353,7 @@ public:
     uint256 token;
 
     //! empty constructor
-    CCoins() : fCoinBase(false), fTokenBase(false), vout(0), nHeight(0) {}
+    CCoins() : fCoinBase(false), fCoinStake(false), vout(0), nHeight(0) {}
 
     template <typename Stream>
     void Unserialize(Stream& s)
@@ -391,8 +388,6 @@ public:
         }
         // coinbase height
         ::Unserialize(s, VARINT(nHeight));
-
-        ::Unserialize(s, fTokenBase);
 
         ::Unserialize(s, token);
     }
@@ -444,7 +439,7 @@ bool CCoinsViewDB::Upgrade()
             COutPoint outpoint(key.second, 0);
             for (size_t i = 0; i < old_coins.vout.size(); ++i) {
                 if (!old_coins.vout[i].IsNull() && !old_coins.vout[i].scriptPubKey.IsUnspendable()) {
-                    Coin newcoin(std::move(old_coins.vout[i]), old_coins.nHeight, old_coins.fCoinBase, old_coins.fCoinStake, old_coins.fTokenBase, old_coins.nTime, old_coins.token);
+                    Coin newcoin(std::move(old_coins.vout[i]), old_coins.nHeight, old_coins.fCoinBase, old_coins.fCoinStake, old_coins.nTime, old_coins.token);
                     outpoint.n = i;
                     CoinEntry entry(&outpoint);
                     batch.Write(entry, newcoin);

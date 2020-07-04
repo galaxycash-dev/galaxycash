@@ -1271,7 +1271,7 @@ bool CCoinsViewMemPool::GetCoin(const COutPoint& outpoint, Coin& coin) const
             GalaxyCashToken t; s >> t; token = t.GetHash();
         }
         if (outpoint.n < ptx->vout.size()) {
-            coin = Coin(ptx->vout[outpoint.n], MEMPOOL_HEIGHT, false, ptx->IsCoinStake(), ptx->IsTokenBase(), ptx->nTime, token);
+            coin = Coin(ptx->vout[outpoint.n], MEMPOOL_HEIGHT, false, ptx->IsCoinStake(), ptx->nTime, token);
             return true;
         } else {
             return false;

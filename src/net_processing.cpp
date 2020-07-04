@@ -1657,6 +1657,11 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             vRecv.SetType(vRecv.GetType() & ~SER_GALAXYCASH);
         else
             vRecv.SetType(vRecv.GetType() | SER_GALAXYCASH);
+
+        if (pfrom->nVersion < ECO_VERSION)
+            vRecv.SetType(vRecv.GetType() & ~SER_GALAXYCASH_ECO);
+        else
+            vRecv.SetType(vRecv.GetType() | SER_GALAXYCASH_ECO);
     }
     // At this point, the outgoing message serialization version can't change.
     const CNetMsgMaker msgMaker(pfrom->GetSendVersion());

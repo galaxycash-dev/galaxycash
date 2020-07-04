@@ -14,8 +14,9 @@
 #include <stdint.h>
 
 
+std::unique_ptr<GalaxyCashDB> pgdb;
 
-GalaxyCashDB::GalaxyCashDB(size_t nCacheSize, bool fMemory, bool fWipe) : CDBWrapper(GetDataDir() / "galaxycash" / "database", nCacheSize, fMemory, fWipe)
+GalaxyCashDB::GalaxyCashDB(size_t nCacheSize, bool fMemory, bool fWipe) : CDBWrapper(GetDataDir() / "gdb", nCacheSize, fMemory, fWipe)
 {
 }
 
@@ -23,21 +24,27 @@ GalaxyCashDB::GalaxyCashDB(size_t nCacheSize, bool fMemory, bool fWipe) : CDBWra
 bool GalaxyCashDB::AddToken(const GalaxyCashToken& token)
 {
     uint256 hash = token.GetHash();
+    if (Exists(hash)) return false;
+
+    
     if (!Write(hash, token)) return false;
-    uint256 hash2 = SerializeHash(token.name + "-name");
+    uint256 hash2 = SerializeHash(token.name + "-nm");
     if (!Write(hash2, hash)) return false;
-    hash2 = SerializeHash(token.symbol + "-symbol");
+    hash2 = SerializeHash(token.symbol + "-sym");
     if (!Write(hash2, hash)) return false;
 
+    return true;
 }
 
 bool GalaxyCashDB::RemoveToken(const uint256 &hash)
 {
+    if (!Exists(hash)) return false;
+
     GalaxyCashToken token;
     if (AccessToken(hash, token)) {
         Erase(hash);
-        Erase(SerializeHash(token.name + "-name"));
-        Erase(SerializeHash(token.symbol + "-symbol"));
+        Erase(SerializeHash(token.name + "-nm"));
+        Erase(SerializeHash(token.symbol + "-sym"));
         return true;
     }
     return false;
@@ -50,13 +57,13 @@ bool GalaxyCashDB::AccessToken(const uint256 &hash, GalaxyCashToken& token)
 
 bool GalaxyCashDB::AccessTokenByName(const std::string &str, GalaxyCashToken& token)
 {
-    uint256 hash = SerializeHash(str + "-name");
+    uint256 hash = SerializeHash(str + "-nm");
     return Read(hash, token);
 }
 
 bool GalaxyCashDB::AccessTokenBySymbol(const std::string &str, GalaxyCashToken& token)
 {
-    uint256 hash = SerializeHash(str + "-symbol");
+    uint256 hash = SerializeHash(str + "-sym");
     return Read(hash, token);
 }
 
@@ -64,6 +71,3 @@ bool GalaxyCashDB::HaveToken(const uint256 &hash)
 {
     return Exists(hash);
 }
-
-
-GalaxyCashDB *pgdb = nullptr;

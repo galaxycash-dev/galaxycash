@@ -34,7 +34,8 @@ enum {
     SER_DISK = (1 << 1),
     SER_GETHASH = (1 << 2),
 
-    SER_GALAXYCASH = (1 << 18)
+    SER_GALAXYCASH = (1 << 18),
+    SER_GALAXYCASH_ECO = (1 << 19)
 };
 
 

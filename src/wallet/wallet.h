@@ -259,6 +259,7 @@ public:
     bool IsTokenBase() const { return tx->IsTokenBase(); }
     bool IsToken() const { return tx->IsToken(); }
     bool IsCoinStake() const { return tx->IsCoinStake(); }
+    uint256 GetToken() const { return tx->token; }
 };
 
 /** 
