@@ -231,6 +231,9 @@ inline void UnserializeTransaction(TxType& tx, Stream& s)
     if (tx.nVersion > 2) {
         s >> tx.token;
         s >> tx.info;
+    } else {
+        tx.token = uint256();
+        tx.info.clear();
     }
 }
 

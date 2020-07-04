@@ -82,9 +82,9 @@ public:
 
 
     bool AddToken(const GalaxyCashToken& token);
-    bool RemoveToken(const uint256 &token);
-    bool AccessToken(const uint256 &token, GalaxyCashToken& token);
-    bool HaveToken(const uint256 &token);
+    bool RemoveToken(const uint256 &hash);
+    bool AccessToken(const uint256 &hash, GalaxyCashToken& token);
+    bool HaveToken(const uint256 &hash);
     bool AccessTokenByName(const std::string& name, GalaxyCashToken& token);
     bool AccessTokenBySymbol(const std::string& symbol, GalaxyCashToken& token);
 };

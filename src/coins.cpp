@@ -7,6 +7,9 @@
 #include <consensus/consensus.h>
 #include <random.h>
 
+#include <streams.h>
+#include <galaxycash.h>
+
 bool CCoinsView::GetCoin(const COutPoint& outpoint, Coin& coin) const { return false; }
 uint256 CCoinsView::GetBestBlock() const { return uint256(); }
 std::vector<uint256> CCoinsView::GetHeadBlocks() const { return std::vector<uint256>(); }
@@ -93,8 +96,9 @@ void AddCoins(CCoinsViewCache& cache, const CTransaction& tx, int nHeight, bool 
     bool fCoinbase = tx.IsCoinBase();
     const uint256& txid = tx.GetHash();
     uint256 token;
+
     if (tx.IsTokenBase()) {
-        CDataStream s(tx.info.begin(), tx.info.end(), SER_NETWORK, PROTOCOL_VERSION);
+        CDataStream s((const char*) tx.info.data(), (const char *)(tx.info.data() + tx.info.size()), SER_NETWORK, PROTOCOL_VERSION);
         GalaxyCashToken t; s >> t; token = t.GetHash();
     } else {
         token = tx.token;
@@ -103,7 +107,7 @@ void AddCoins(CCoinsViewCache& cache, const CTransaction& tx, int nHeight, bool 
         bool overwrite = check ? cache.HaveCoin(COutPoint(txid, i)) : fCoinbase;
         // Always set the possible_overwrite flag to AddCoin for coinbase txn, in order to correctly
         // deal with the pre-BIP30 occurrences of duplicate coinbase transactions.
-        cache.AddCoin(COutPoint(txid, i), Coin(tx.vout[i], nHeight, fCoinbase, tx.IsCoinStake(), tx.TokenBase(), tx.nTime, token), overwrite);
+        cache.AddCoin(COutPoint(txid, i), Coin(tx.vout[i], nHeight, fCoinbase, tx.IsCoinStake(), tx.IsTokenBase(), tx.nTime, token), overwrite);
     }
 }
 

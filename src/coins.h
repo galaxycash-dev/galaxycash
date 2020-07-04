@@ -176,7 +176,6 @@ struct CCoinsCacheEntry {
 };
 
 typedef std::unordered_map<COutPoint, CCoinsCacheEntry, SaltedOutpointHasher> CCoinsMap;
-typedef std::map<uint256, GalaxyCashToken> CTokensMap;
 
 /** Cursor for iterating over CoinsView state */
 class CCoinsViewCursor
@@ -265,7 +264,7 @@ protected:
      */
     mutable uint256 hashBlock;
     mutable CCoinsMap cacheCoins;
-    mutable CTokensMap cacheTokens;
+
 
     /* Cached dynamic memory usage for the inner Coin objects. */
     mutable size_t cachedCoinsUsage;

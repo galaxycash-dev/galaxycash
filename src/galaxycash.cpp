@@ -20,7 +20,7 @@ GalaxyCashDB::GalaxyCashDB(size_t nCacheSize, bool fMemory, bool fWipe) : CDBWra
 }
 
 
-bool GalaxyCashDB::AddToken(GalaxyCashToken& token)
+bool GalaxyCashDB::AddToken(const GalaxyCashToken& token)
 {
     uint256 hash = token.GetHash();
     if (!Write(hash, token)) return false;
@@ -31,14 +31,16 @@ bool GalaxyCashDB::AddToken(GalaxyCashToken& token)
 
 }
 
-void GalaxyCashDB::RemoveToken(const uint256 &hash)
+bool GalaxyCashDB::RemoveToken(const uint256 &hash)
 {
     GalaxyCashToken token;
     if (AccessToken(hash, token)) {
         Erase(hash);
         Erase(SerializeHash(token.name + "-name"));
         Erase(SerializeHash(token.symbol + "-symbol"));
+        return true;
     }
+    return false;
 }
 
 bool GalaxyCashDB::AccessToken(const uint256 &hash, GalaxyCashToken& token)
@@ -60,7 +62,7 @@ bool GalaxyCashDB::AccessTokenBySymbol(const std::string &str, GalaxyCashToken& 
 
 bool GalaxyCashDB::HaveToken(const uint256 &hash)
 {
-    return db.Exists(hash);
+    return Exists(hash);
 }
 
 

@@ -39,6 +39,7 @@
 #include <validation.h>
 #include <validationinterface.h>
 #include <warnings.h>
+#include <galaxycash.h>
 
 #include <bignum.h>
 #include <kernel.h>
@@ -1400,7 +1401,7 @@ DisconnectResult CChainState::DisconnectBlock(const CBlock& block, const CBlockI
         }
 
         if (tx.IsTokenBase()) {
-            CDataStream s(tx.info.begin(), tx.info.end(), SER_NETWORK, PROTOCOL_VERSION);
+            CDataStream s((const char *) tx.info.data(), (const char *)(tx.info.data() + tx.info.size()), SER_NETWORK, PROTOCOL_VERSION);
             GalaxyCashToken token; s >> token;
             pgdb->RemoveToken(token.GetHash());
         }
@@ -1662,7 +1663,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         const CTransaction& tx = *(block.vtx[i]);
 
         if (tx.IsTokenBase()) {
-            CDataStream s(tx.info.begin(), tx.info.end(), SER_NETWORK, PROTOCOL_VERSION);
+            CDataStream s((const char*) tx.info.data(), (const char *)(tx.info.data() + tx.info.size()), SER_NETWORK, PROTOCOL_VERSION);
             GalaxyCashToken token; s >> token;
             pgdb->AddToken(token);
         }
@@ -1672,7 +1673,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         if (tx.IsCoinBase()) {
             nReward = tx.GetValueOut();
             nValueOut += nReward;
-        } else {
+        } else if (!tx.IsTokenBase()) {
             CAmount txfee = 0;
             if (!Consensus::CheckTxInputs(tx, state, view, pindex->nHeight, txfee, chainparams.GetConsensus())) {
                 return error("%s: Consensus::CheckTxInputs: %s, %s", __func__, tx.GetHash().ToString(), FormatStateMessage(state));
@@ -1683,7 +1684,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
             nValueIn += tx.IsBurned() ? 0 : nValueA;
             nValueOut += tx.IsBurned() ? 0 : nValueB;
 
-            if (!tx.IsCoinStake())
+            if (!tx.IsCoinStake() && !tx.IsToken())
                 nFees += txfee;
             if (tx.IsCoinStake())
                 nReward = nValueOut - nValueIn;
