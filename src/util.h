@@ -216,8 +216,6 @@ void ReleaseDirectoryLocks();
 bool TryCreateDirectories(const fs::path& p);
 fs::path GetDefaultDataDir();
 const fs::path& GetDataDir(bool fNetSpecific = true);
-fs::path GetModuleDir(bool fNetSpecific = true);
-fs::path GetWorkspaceDir(bool fNetSpecific = true);
 void ClearDatadirCache();
 fs::path GetConfigFile(const std::string& confPath);
 fs::path GetMasternodeConfigFile();

@@ -19,7 +19,7 @@ public:
     {
         CSerializedNetMsg msg;
         msg.command = std::move(sCommand);
-        int32_t serModes = nVersion <= OLD_VERSION ? SER_NETWORK : (nVersion < ECO_VERSION ? (SER_NETWORK | SER_GALAXYCASH) : (SER_NETWORK | SER_GALAXYCASH | SER_GALAXYCASH_ECO));
+        int32_t serModes = nVersion <= OLD_VERSION ? SER_NETWORK : SER_NETWORK | SER_GALAXYCASH;
         CVectorWriter{serModes, nFlags | nVersion, msg.data, 0, std::forward<Args>(args)...};
         return msg;
     }

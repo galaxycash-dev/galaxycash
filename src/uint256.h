@@ -25,15 +25,12 @@ public:
 template <unsigned int BITS>
 class base_blob
 {
-public:
-    static constexpr int BITCOUNT = BITS;
-    static constexpr int WIDTH32 = BITS / 32;
-    static constexpr int WIDTH8 = BITS / 8;
-    static constexpr int WIDTH = BITS;
 protected:
+    static constexpr int WIDTH = BITS / 8;
+    static constexpr int WIDTH32 = BITS / 32;
     union {
         struct {
-            uint8_t data[WIDTH8];
+            uint8_t data[WIDTH];
         };
         struct {
             uint32_t pn[WIDTH32];
@@ -44,10 +41,6 @@ public:
     const uint32_t* GetDataPtr() const
     {
         return (const uint32_t*)data;
-    }
-
-    std::vector<uint8_t> GetVch() const {
-        return std::vector<uint8_t>(begin(), end());
     }
 
     base_blob()
@@ -296,8 +289,9 @@ public:
     }
 
     void SetUInt8(uint8_t value) {
-        memset(data, 0, sizeof(data));
-        data[0] = value;      
+        data[0] = value;
+        for (size_t i = 1; i < WIDTH; i++)
+            data[i] = 0;        
     }
 
     uint8_t GetUInt8() const {
@@ -305,9 +299,10 @@ public:
     }
 
     void SetUInt16(uint16_t value) {
-        memset(data, 0, sizeof(data));
         data[0] = (uint8_t)(value);
         data[1] = (uint8_t)(value >> 8);
+        for (size_t i = 2; i < WIDTH; i++)
+            data[i] = 0;
     }
 
     uint16_t GetUInt16() const {
@@ -315,8 +310,9 @@ public:
     }
 
     void SetUInt32(uint32_t value) {
-        memset(data, 0, sizeof(data));
         pn[0] = value;
+        for (size_t i = 1; i < WIDTH32; i++)
+            pn[i] = 0;
     }
 
     uint32_t GetUInt32() const {
@@ -324,9 +320,10 @@ public:
     }
 
     void SetUInt64(uint64_t value) {
-        memset(data, 0, sizeof(data));
         pn[0] = (uint32_t)(value);
         pn[1] = (uint32_t)(value >> 32);
+        for (size_t i = 1; i < WIDTH32; i++)
+            pn[i] = 0;
     }
 
     uint64_t GetUInt64() const {
@@ -346,40 +343,14 @@ public:
                ((uint64_t)ptr[7]) << 56;
     }
 
-    void Set64(int n, const uint64_t value)
-    {
-        ((uint64_t*)data)[n] = value;
-    }
     uint64_t Get64(int n = 0) const
     {
         return ((uint32_t*)data)[2 * n] | (uint64_t)((uint32_t*)data)[2 * n + 1] << 32;
     }
 
-    void Set32(int n, const uint32_t value)
-    {
-        ((uint32_t*)data)[n] = value;
-    }
     uint32_t Get32(int n = 0) const
     {
-        return ((uint32_t*)data)[n];
-    }
-
-    void Set16(int n, const uint16_t value)
-    {
-        ((uint16_t*)data)[n] = value;
-    }
-    uint16_t Get16(int n = 0) const
-    {
-        return ((uint16_t*)data)[n];
-    }
-
-    void Set8(int n, const uint8_t value) const
-    {
-        data[n] = value;
-    }
-    uint8_t Get8(int n = 0) const
-    {
-        return data[n];
+        return ((uint32_t*)data)[2 * n];
     }
     /**
      * Returns the position of the highest bit set plus one, or zero if the
@@ -414,18 +385,8 @@ class uint160 : public base_blob<160>
 {
 public:
     uint160() {}
-    uint160(const base_blob<160>& b) : base_blob<160>(b) {}
-    uint160(uint64_t b) : base_blob<160>(b) {}
-    explicit uint160(const std::string& str) : base_blob<160>(str) {}
     explicit uint160(const std::vector<unsigned char>& vch) : base_blob<160>(vch) {}
 };
-
-inline uint160 uint160S(const char* str)
-{
-    uint160 rv;
-    rv.SetHex(str);
-    return rv;
-}
 
 /** 256-bit opaque blob.
  * @note This type is called uint256 for historical reasons only. It is an
@@ -436,7 +397,6 @@ class uint256 : public base_blob<256>
 {
 public:
     uint256() {}
-    uint256(const base_blob<160>& b) : base_blob<256>(b.GetVch()) {}
     uint256(const base_blob<256>& b) : base_blob<256>(b) {}
     uint256(uint64_t b) : base_blob<256>(b) {}
     explicit uint256(const std::string& str) : base_blob<256>(str) {}
@@ -451,12 +411,6 @@ public:
     uint64_t GetCheapHash() const
     {
         return ReadLE64(data);
-    }
-    uint160 trim160() const
-    {
-        uint160 trim;
-        memcpy((void*)&trim, data, sizeof(uint160));
-        return trim;
     }
 
     uint256& SetCompact(uint32_t nCompact, bool* pfNegative = NULL, bool* pfOverflow = NULL);
@@ -489,11 +443,6 @@ class uint512 : public base_blob<512>
 {
 public:
     uint512() {}
-    uint512(const base_blob<160>& b) : base_blob<512>(b.GetVch()) {}
-    uint512(const base_blob<256>& b) : base_blob<512>(b.GetVch()) {}
-    uint512(const base_blob<512>& b) : base_blob<512>(b) {}
-    uint512(uint64_t b) : base_blob<512>(b) {}
-    explicit uint512(const std::string& str) : base_blob<512>(str) {}
     explicit uint512(const std::vector<unsigned char>& vch) : base_blob<512>(vch) {}
 
     /** A cheap hash function that just returns 64 bits from the result, it can be
@@ -504,12 +453,6 @@ public:
     uint64_t GetCheapHash() const
     {
         return ReadLE64(data);
-    }
-    uint160 trim160() const
-    {
-        uint160 trim;
-        memcpy((void*)&trim, data, sizeof(uint160));
-        return trim;
     }
     uint256 trim256() const
     {

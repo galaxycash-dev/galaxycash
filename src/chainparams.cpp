@@ -103,9 +103,11 @@ public:
         consensus.BIP16Height = 0;
         consensus.BIP34Height = 1;
         consensus.BIP34Hash = uint256S("0x000002e5d366c89b16195d618462f5ad14f8bbfaf39a93f2593c2ceb67d94c16");
-        consensus.powLimit = uint256S("0x00000fffff000000000000000000000000000000000000000000000000000000");      
-        
-        consensus.ECOHeight = 685000;                                                                                                      // ~arith_uint256(0) >> 32;
+        consensus.powLimit = uint256S("0x00000fffff000000000000000000000000000000000000000000000000000000");
+
+        consensus.ECOHeight = 680000;
+        consensus.SubsidyStopHeight = 600000;
+
 
         // POS
         consensus.stakeLimit = uint256S("0x00000fffff000000000000000000000000000000000000000000000000000000");
@@ -164,7 +166,6 @@ public:
         vSeeds.emplace_back("204.12.216.234");
         vSeeds.emplace_back("188.154.210.90");
         vSeeds.emplace_back("141.226.9.42");
-
         
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1, 38); // galaxycash: addresses begin with 'G'
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1, 99);
@@ -195,9 +196,7 @@ public:
             {450000, uint256S("0xae77be762ec79fc75e4be9ad2c61f1cc477738b4d3b9bf568ae16208e254598e")},
             {466000, uint256S("0x9a4004b1327ae419b54cf9afa360b0aece7abe21a5a01860f3e131afde31c037")},
             {480000, uint256S("0xcdd2849b2781eaedaa6273a2ebd56c8827435e2d85f93861a9b50493ecf143ca")},
-            {490000, uint256S("0xf9652d83e27d0e6bfc3e18894bdfb411013b9dc587b771b3579510b6de36d632")},
-            {500000, uint256S("0x570eed621d4ad90c6e71abaf4ffe66f24e768c2c8e0e11d1fb83f2d0a1c2f224")},
-            {600000, uint256S("0xc1d6692b528e5e6e4ba2548861e1af5d7ded44901280a2fcb42f442425f057d3")}}};
+            {490000, uint256S("0xf9652d83e27d0e6bfc3e18894bdfb411013b9dc587b771b3579510b6de36d632")}}};
 
 
         chainTxData = ChainTxData{
@@ -219,10 +218,11 @@ public:
     {
         strNetworkID = "test";
 
-        consensus.ECOHeight = 0;    
-
         consensus.nLastPoW = 130000;
         consensus.nSubsidyHalvingInterval = 210000;
+
+        consensus.ECOHeight = 0;
+        consensus.SubsidyStopHeight = 0;
 
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = true;
@@ -300,7 +300,6 @@ public:
         consensus.BIP16Height = 0;         // always enforce P2SH BIP16 on regtest
         consensus.BIP34Height = 100000000; // BIP34 has not activated on regtest (far in the future so block v1 are not rejected in tests)
         consensus.BIP34Hash = uint256();
-        consensus.ECOHeight = 0;    
         consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");            // ~arith_uint256(0) >> 28;
 
         consensus.nTargetTimespan = 7 * 24 * 60 * 60;                         // two weeks

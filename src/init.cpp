@@ -49,6 +49,7 @@
 #endif
 #include <warnings.h>
 
+#include <galaxycash.h>
 
 #include <memory>
 #include <stdint.h>
@@ -70,9 +71,6 @@
 #if ENABLE_ZMQ
 #include <zmq/zmqnotificationinterface.h>
 #endif
-
-#include <galaxycash.h>
-#include <galaxyscript.h>
 
 static const bool DEFAULT_PROXYRANDOMIZE = true;
 static const bool DEFAULT_REST_ENABLE = false;
@@ -194,7 +192,6 @@ void Shutdown()
     RenameThread("galaxycash-shutoff");
     mempool.AddTransactionsUpdated(1);
 
-    GSShutdown();
 
     StopHTTPRPC();
     StopREST();
@@ -257,11 +254,11 @@ void Shutdown()
         if (pcoinsTip != nullptr) {
             FlushStateToDisk();
         }
+        pgdb.reset();
         pcoinsTip.reset();
         pcoinscatcher.reset();
         pcoinsdbview.reset();
         pblocktree.reset();
-        pgdb.reset();
     }
 #ifdef ENABLE_WALLET
     StopWallets();
@@ -532,8 +529,8 @@ std::string HelpMessage(HelpMessageMode mode)
 
 std::string LicenseInfo()
 {
-    const std::string URL_SOURCE_CODE = "<https://github.com/galaxycash-dev/galaxycash>";
-    const std::string URL_WEBSITE = "<https://galaxycash.online/>";
+    const std::string URL_SOURCE_CODE = "<https://github.com/galaxycash/galaxycash>";
+    const std::string URL_WEBSITE = "<https://galaxy-hub.online/>";
 
     return CopyrightHolders(strprintf(_("Copyright (C) %i-%i"), 2012, COPYRIGHT_YEAR) + " ") + "\n" +
            "\n" +
@@ -1285,11 +1282,15 @@ bool AppInitMain()
     int64_t nCoinDBCache = std::min(nTotalCache / 2, (nTotalCache / 4) + (1 << 23)); // use 25%-50% of the remainder for disk cache
     nCoinDBCache = std::min(nCoinDBCache, nMaxCoinsDBCache << 20);                   // cap total coins db cache
     nTotalCache -= nCoinDBCache;
+    int64_t nGDBCache = std::min(nTotalCache / 2, (nTotalCache / 4) + (1 << 23)); // use 25%-50% of the remainder for disk cache
+    nGDBCache = std::min(nGDBCache, nMaxCoinsDBCache << 20);                   // cap total coins db cache
+    nTotalCache -= nGDBCache;
     nCoinCacheUsage = nTotalCache; // the rest goes to in-memory cache
     int64_t nMempoolSizeMax = gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000;
     LogPrintf("Cache configuration:\n");
     LogPrintf("* Using %.1fMiB for block index database\n", nBlockTreeDBCache * (1.0 / 1024 / 1024));
     LogPrintf("* Using %.1fMiB for chain state database\n", nCoinDBCache * (1.0 / 1024 / 1024));
+    LogPrintf("* Using %.1fMiB for token ecosystem database\n", nGDBCache * (1.0 / 1024 / 1024));
     LogPrintf("* Using %.1fMiB for in-memory UTXO set (plus up to %.1fMiB of unused mempool space)\n", nCoinCacheUsage * (1.0 / 1024 / 1024), nMempoolSizeMax * (1.0 / 1024 / 1024));
 
     bool fLoaded = false;
@@ -1303,9 +1304,13 @@ bool AppInitMain()
         do {
             try {
                 UnloadBlockIndex();
+                pgdb.reset();
                 pcoinsTip.reset();
                 pcoinsdbview.reset();
                 pcoinscatcher.reset();
+
+                pgdb.reset(new GalaxyCashDB(nGDBCache, false, fReset || fReindexChainState));
+
                 // new CBlockTreeDB tries to delete the existing file, which
                 // fails if it's still open from the previous loop. Close it first:
                 pblocktree.reset();
@@ -1315,8 +1320,6 @@ bool AppInitMain()
                     pblocktree->WriteReindexing(true);
 
                 if (fRequestShutdown) break;
-
-                pgdb.reset(new GalaxyCashDB(nCoinDBCache, false, fReset || fReindexChainState));
 
                 // LoadBlockIndex will load fTxIndex from the db, or set it if
                 // we're reindexing.
@@ -1690,7 +1693,6 @@ bool AppInitMain()
 
     sporkManager.Init();
     threadGroup.create_thread(boost::bind(&ThreadSporks));
-
     
-    return GSInit();
+    return true;
 }

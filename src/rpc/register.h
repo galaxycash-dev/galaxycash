@@ -21,8 +21,6 @@ void RegisterMiningRPCCommands(CRPCTable& tableRPC);
 void RegisterRawTransactionRPCCommands(CRPCTable& tableRPC);
 /** Register masternode RPC commands */
 void RegisterMasternodeRPCCommands(CRPCTable& tableRPC);
-/** Register token RPC commands */
-void RegisterTokenRPCCommands(CRPCTable& tableRPC);
 
 static inline void RegisterAllCoreRPCCommands(CRPCTable& t)
 {
@@ -32,7 +30,6 @@ static inline void RegisterAllCoreRPCCommands(CRPCTable& t)
     RegisterMiningRPCCommands(t);
     RegisterRawTransactionRPCCommands(t);
     RegisterMasternodeRPCCommands(t);
-    RegisterTokenRPCCommands(t);
 }
 
 #endif

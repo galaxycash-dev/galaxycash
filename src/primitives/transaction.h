@@ -201,8 +201,7 @@ public:
 
 struct CMutableTransaction;
 
-static const int32_t TX_BASE_VERSION = 4;
-static const int32_t TX_TOKEN_VERSION = 5;
+static const int32_t TX_ECO_VERSION = 3;
 
 /**
  * Basic transaction serialization format:
@@ -230,13 +229,9 @@ inline void UnserializeTransaction(TxType& tx, Stream& s)
     s >> tx.vin;
     s >> tx.vout;
     s >> tx.nLockTime;
-
-    if (s.GetVersion() >= TX_BASE_VERSION && s.GetType() & SER_GALAXYCASH_ECO) {
+    if (tx.nVersion == TX_ECO_VERSION) {
         s >> tx.token;
-        s >> tx.info;
-    } else {
-        tx.token.SetNull();
-        tx.info.clear();
+        s >> tx.data;
     }
 }
 
@@ -248,9 +243,9 @@ inline void SerializeTransaction(const TxType& tx, Stream& s)
     s << tx.vin;
     s << tx.vout;
     s << tx.nLockTime;
-    if (!(s.GetType() & SER_GETHASH) && s.GetVersion() >= TX_BASE_VERSION && (s.GetType() & SER_GALAXYCASH_ECO)) {
+    if (tx.nVersion == TX_ECO_VERSION && !(s.GetType() & SER_GETHASH)) {
         s << tx.token;
-        s << tx.info;
+        s << tx.data;
     }
 }
 
@@ -262,13 +257,14 @@ class CTransaction
 public:
     // Default transaction version.
     static const int32_t CURRENT_VERSION = 1; //ppcTODO - change this to 2 after BIP68 fork happens.
-
+    // GalaxyCash Token Ecosystem transaction version.
+    static const int32_t ECO_VERSION = TX_ECO_VERSION; 
 
     // Changing the default transaction version requires a two step process: first
     // adapting relay policy by bumping MAX_STANDARD_VERSION, and then later date
     // bumping the default CURRENT_VERSION at which point both CURRENT_VERSION and
     // MAX_STANDARD_VERSION will be equal.
-    static const int32_t MAX_STANDARD_VERSION = 5;
+    static const int32_t MAX_STANDARD_VERSION = 4;
 
     // The local variables are made const to prevent unintended modification
     // without updating the cached hash value. However, CTransaction is not
@@ -277,11 +273,11 @@ public:
     // structure, including the hash.
     const std::vector<CTxIn> vin;
     const std::vector<CTxOut> vout;
-    const std::vector<unsigned char> info;
-    const uint256 token;
     const int32_t nVersion;
     const uint32_t nTime;
     const uint32_t nLockTime;
+    const uint256 token;
+    const std::vector<unsigned char> data;
 
 private:
     /** Memory only. */
@@ -335,32 +331,21 @@ public:
 
     bool IsCoinBase() const
     {
-        return (vin.size() == 1 && vin[0].prevout.IsNull() && vout.size() >= 1 && token.IsNull() && info.empty());
-    }
-
-    bool IsTokenBase() const
-    {
-        return (vin.size() == 1 && vout.size() == 1 && !token.IsNull() && !info.empty());
-    }
-
-    bool IsToken() const
-    {
-        return (vin.size() >= 1 && (vout.size() >= 1 || vout.size() == 0) && !token.IsNull() && info.empty());
-    }
-
-    bool IsBurned() const
-    {
-        return (vin.size() >= 1 && vout.size() == 0 && info.empty());
-    }
-
-    uint256 GetToken() const {
-        return token;
+        return (vin.size() == 1 && vin[0].prevout.IsNull() && vout.size() >= 1 && data.empty());
     }
 
     bool IsCoinStake() const
     {
         // galaxycash: the coin stake transaction is marked with the first output empty
-        return (vin.size() > 0 && (!vin[0].prevout.IsNull()) && vout.size() >= 2 && vout[0].IsEmpty()  && token.IsNull() && info.empty());
+        return (vin.size() > 0 && (!vin[0].prevout.IsNull()) && vout.size() >= 2 && vout[0].IsEmpty() && token.IsNull() && data.empty());
+    }
+
+    bool IsTokenBase() const {
+        return (nVersion == ECO_VERSION) && (vin.size() >= 1 && vout.size() == 1 && !token.IsNull() && !data.empty());
+    }
+
+    bool IsToken() const {
+        return (nVersion == ECO_VERSION) && (vin.size() >= 1 && vout.size() >= 1 && !token.IsNull() && data.empty());
     }
 
     friend bool operator==(const CTransaction& a, const CTransaction& b)
@@ -380,11 +365,11 @@ public:
 struct CMutableTransaction {
     std::vector<CTxIn> vin;
     std::vector<CTxOut> vout;
-    uint256 token;
-    std::vector<unsigned char> info;
     int32_t nVersion;
     uint32_t nTime;
     uint32_t nLockTime;
+    uint256 token;
+    std::vector<unsigned char> data;
 
     CMutableTransaction();
     CMutableTransaction(const CTransaction& tx);

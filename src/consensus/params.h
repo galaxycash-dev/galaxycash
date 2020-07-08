@@ -30,8 +30,7 @@ struct Params {
     /** Block height and hash at which BIP34 becomes active */
     int BIP34Height;
     uint256 BIP34Hash;
-    /** Block height at which GalaxyCash Token Ecosystem becomes active */
-    int ECOHeight;
+    int ECOHeight, SubsidyStopHeight;
 
     uint32_t nRuleChangeActivationThreshold;
     uint32_t nMinerConfirmationWindow;

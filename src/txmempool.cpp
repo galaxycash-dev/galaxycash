@@ -27,8 +27,6 @@
 
 #include <chainparams.h>
 
-#include <galaxycash.h>
-
 
 /**
  * Keep track of fee/priority for transactions confirmed within N blocks
@@ -1265,13 +1263,8 @@ bool CCoinsViewMemPool::GetCoin(const COutPoint& outpoint, Coin& coin) const
     // transactions. First checking the underlying cache risks returning a pruned entry instead.
     CTransactionRef ptx = mempool.get(outpoint.hash);
     if (ptx) {
-        uint256 token = ptx->token;
-        if (ptx->IsTokenBase()) {
-            CDataStream s((const char*) ptx->info.data(), (const char *)(ptx->info.data() + ptx->info.size()), SER_NETWORK, PROTOCOL_VERSION);
-            GalaxyCashToken t; s >> t; token = t.GetHash();
-        }
         if (outpoint.n < ptx->vout.size()) {
-            coin = Coin(ptx->vout[outpoint.n], MEMPOOL_HEIGHT, false, ptx->IsCoinStake(), ptx->nTime, token);
+            coin = Coin(ptx->vout[outpoint.n], MEMPOOL_HEIGHT, false, ptx->IsCoinStake(), ptx->nTime);
             return true;
         } else {
             return false;

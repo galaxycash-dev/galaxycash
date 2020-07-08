@@ -487,7 +487,7 @@ void PoSMiner(CWallet* pwallet)
     unsigned int pos_timio;
     {
         std::vector<COutput> vCoins;
-        pwallet->AvailableCoins(uint256(), vCoins, false);
+        pwallet->AvailableCoins(vCoins, false);
         pos_timio = gArgs.GetArg("-staketimio", 500) + 30 * sqrt(vCoins.size());
         LogPrintf("Set proof-of-stake timeout: %ums for %u UTXOs\n", pos_timio, vCoins.size());
     }

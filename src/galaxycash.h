@@ -36,7 +36,7 @@
 class GalaxyCashToken {
 public:
     std::string name, symbol;
-    int64_t supply;
+    int64_t supply, reward;
     bool minable;
 
     ADD_SERIALIZE_METHODS;
@@ -46,17 +46,20 @@ public:
     {
         READWRITE(name);
         READWRITE(symbol);
+        READWRITE(reward);
+        READWRITE(minable);
         if (!(s.GetType() & SER_GETHASH)) READWRITE(supply);
     }
 
-    GalaxyCashToken() : supply(0), minable(false) { }
-    GalaxyCashToken(const GalaxyCashToken& token) : name(token.name), symbol(token.symbol), supply(token.supply), minable(token.minable) {}
+    GalaxyCashToken() : supply(0), reward(0), minable(false) { }
+    GalaxyCashToken(const GalaxyCashToken& token) : name(token.name), symbol(token.symbol), supply(token.supply), reward(token.reward), minable(token.minable) {}
 
     GalaxyCashToken& operator=(const GalaxyCashToken& token)
     {
         name = token.name;
         symbol = token.symbol;
         supply = token.supply;
+        reward = token.reward;
         minable = token.minable;
         return *this;
     }
@@ -65,7 +68,8 @@ public:
     {
         name.clear();
         symbol.clear();
-        supply = 0;
+        supply = reward = 0;
+        minable = false;
     }
 
     bool IsNull() const
@@ -112,6 +116,8 @@ public:
 
     GalaxyCashDB(size_t nCacheSize, bool fMemory = false, bool fWipe = false);
 
+    bool SetTxToken(const uint256 &txid, const uint256 &token);
+    bool GetTxToken(const uint256 &txid, uint256 &token);
 
     bool AddToken(const GalaxyCashToken &token);
     bool SetToken(const uint256 &hash, const GalaxyCashToken &token);
@@ -126,6 +132,10 @@ public:
 
     bool GenerateNextPoWWork(const uint256 &hash, GalaxyCashPoWWork &work);
 };
+    
+void SetTokenInfo(CMutableTransaction &tx, const GalaxyCashToken &token);
+bool GetTokenInfo(const CMutableTransaction &tx, GalaxyCashToken &token);
+bool GetTokenInfo(const CTransaction &tx, GalaxyCashToken &token);
 
 extern std::unique_ptr<GalaxyCashDB> pgdb;
 

@@ -1450,14 +1450,12 @@ void CWalletTx::GetAmounts(std::list<COutputEntry>& listReceived,
     std::list<COutputEntry>& listSent,
     CAmount& nFee,
     std::string& strSentAccount,
-    const isminefilter& filter, const uint256 &token) const
+    const isminefilter& filter) const
 {
     nFee = 0;
     listReceived.clear();
     listSent.clear();
     strSentAccount = strFromAccount;
-
-    if (token != tx->token) return;
 
     // Compute fee:
     CAmount nDebit = GetDebit(filter);
@@ -1960,14 +1958,13 @@ void CWallet::ResendWalletTransactions(int64_t nBestBlockTime, CConnman* connman
  */
 
 
-CAmount CWallet::GetBalance(const uint256 &token) const
+CAmount CWallet::GetBalance() const
 {
     CAmount nTotal = 0;
     {
         LOCK2(cs_main, cs_wallet);
         for (const auto& entry : mapWallet) {
             const CWalletTx* pcoin = &entry.second;
-            if (pcoin->tx->token != token) continue;
             if (pcoin->IsTrusted())
                 nTotal += pcoin->GetAvailableCredit();
         }
@@ -1983,22 +1980,19 @@ CAmount CWallet::GetStake() const
     LOCK2(cs_main, cs_wallet);
     for (const auto& entry : mapWallet) {
         const CWalletTx* pcoin = &entry.second;
-        if (pcoin->tx->IsTokenBase() || pcoin->tx->IsToken()) continue;
-
         if (pcoin->IsCoinStake() && pcoin->GetBlocksToMaturity() > 0 && pcoin->GetDepthInMainChain() > 0)
             nTotal += entry.second.GetCredit(ISMINE_ALL);
     }
     return nTotal;
 }
 
-CAmount CWallet::GetUnconfirmedBalance(const uint256 &token) const
+CAmount CWallet::GetUnconfirmedBalance() const
 {
     CAmount nTotal = 0;
     {
         LOCK2(cs_main, cs_wallet);
         for (const auto& entry : mapWallet) {
             const CWalletTx* pcoin = &entry.second;
-            if (pcoin->tx->token != token) continue;
             if (!pcoin->IsTrusted() && pcoin->GetDepthInMainChain() == 0 && pcoin->InMempool())
                 nTotal += pcoin->GetAvailableCredit();
         }
@@ -2006,28 +2000,26 @@ CAmount CWallet::GetUnconfirmedBalance(const uint256 &token) const
     return nTotal;
 }
 
-CAmount CWallet::GetImmatureBalance(const uint256 &token) const
+CAmount CWallet::GetImmatureBalance() const
 {
     CAmount nTotal = 0;
     {
         LOCK2(cs_main, cs_wallet);
         for (const auto& entry : mapWallet) {
             const CWalletTx* pcoin = &entry.second;
-            if (pcoin->tx->token != token) continue;
             nTotal += pcoin->GetImmatureCredit();
         }
     }
     return nTotal;
 }
 
-CAmount CWallet::GetWatchOnlyBalance(const uint256 &token) const
+CAmount CWallet::GetWatchOnlyBalance() const
 {
     CAmount nTotal = 0;
     {
         LOCK2(cs_main, cs_wallet);
         for (const auto& entry : mapWallet) {
             const CWalletTx* pcoin = &entry.second;
-            if (pcoin->tx->token != token) continue;
             if (pcoin->IsTrusted())
                 nTotal += pcoin->GetAvailableWatchOnlyCredit();
         }
@@ -2036,14 +2028,13 @@ CAmount CWallet::GetWatchOnlyBalance(const uint256 &token) const
     return nTotal;
 }
 
-CAmount CWallet::GetUnconfirmedWatchOnlyBalance(const uint256 &token) const
+CAmount CWallet::GetUnconfirmedWatchOnlyBalance() const
 {
     CAmount nTotal = 0;
     {
         LOCK2(cs_main, cs_wallet);
         for (const auto& entry : mapWallet) {
             const CWalletTx* pcoin = &entry.second;
-            if (pcoin->tx->token != token) continue;
             if (!pcoin->IsTrusted() && pcoin->GetDepthInMainChain() == 0 && pcoin->InMempool())
                 nTotal += pcoin->GetAvailableWatchOnlyCredit();
         }
@@ -2051,14 +2042,13 @@ CAmount CWallet::GetUnconfirmedWatchOnlyBalance(const uint256 &token) const
     return nTotal;
 }
 
-CAmount CWallet::GetImmatureWatchOnlyBalance(const uint256 &token) const
+CAmount CWallet::GetImmatureWatchOnlyBalance() const
 {
     CAmount nTotal = 0;
     {
         LOCK2(cs_main, cs_wallet);
         for (const auto& entry : mapWallet) {
             const CWalletTx* pcoin = &entry.second;
-            if (pcoin->tx->token != token) continue;
             nTotal += pcoin->GetImmatureWatchOnlyCredit();
         }
     }
@@ -2071,15 +2061,13 @@ CAmount CWallet::GetImmatureWatchOnlyBalance(const uint256 &token) const
 // wallet, and then subtracts the values of TxIns spending from the wallet. This
 // also has fewer restrictions on which unconfirmed transactions are considered
 // trusted.
-CAmount CWallet::GetLegacyBalance(const isminefilter& filter, int minDepth, const std::string* account, const uint256 &token) const
+CAmount CWallet::GetLegacyBalance(const isminefilter& filter, int minDepth, const std::string* account) const
 {
     LOCK2(cs_main, cs_wallet);
 
     CAmount balance = 0;
     for (const auto& entry : mapWallet) {
         const CWalletTx& wtx = entry.second;
-        if (wtx.tx->token != token) continue;
-
         const int depth = wtx.GetDepthInMainChain();
         if (depth < 0 || !CheckFinalTx(*wtx.tx) || wtx.GetBlocksToMaturity() > 0) {
             continue;
@@ -2110,13 +2098,13 @@ CAmount CWallet::GetLegacyBalance(const isminefilter& filter, int minDepth, cons
     return balance;
 }
 
-CAmount CWallet::GetAvailableBalance(const CCoinControl* coinControl, const uint256 &token) const
+CAmount CWallet::GetAvailableBalance(const CCoinControl* coinControl) const
 {
     LOCK2(cs_main, cs_wallet);
 
     CAmount balance = 0;
     std::vector<COutput> vCoins;
-    AvailableCoins(token, vCoins, true, coinControl);
+    AvailableCoins(vCoins, true, coinControl);
     for (const COutput& out : vCoins) {
         if (out.fSpendable) {
             balance += out.tx->tx->vout[out.i].nValue;
@@ -2125,7 +2113,7 @@ CAmount CWallet::GetAvailableBalance(const CCoinControl* coinControl, const uint
     return balance;
 }
 
-void CWallet::AvailableCoins(const uint256 &token, std::vector<COutput>& vCoins, bool fOnlySafe, const CCoinControl* coinControl, const CAmount& nMinimumAmount, const CAmount& nMaximumAmount, const CAmount& nMinimumSumAmount, const uint64_t nMaximumCount, const int nMinDepth, const int nMaxDepth, uint32_t nSpendTime) const
+void CWallet::AvailableCoins(std::vector<COutput>& vCoins, bool fOnlySafe, const CCoinControl* coinControl, const CAmount& nMinimumAmount, const CAmount& nMaximumAmount, const CAmount& nMinimumSumAmount, const uint64_t nMaximumCount, const int nMinDepth, const int nMaxDepth, uint32_t nSpendTime) const
 {
     vCoins.clear();
 
@@ -2137,8 +2125,6 @@ void CWallet::AvailableCoins(const uint256 &token, std::vector<COutput>& vCoins,
         for (const auto& entry : mapWallet) {
             const uint256& wtxid = entry.first;
             const CWalletTx* pcoin = &entry.second;
-
-            if (token != pcoin->tx->token) continue;
 
             if (!CheckFinalTx(*pcoin->tx))
                 continue;
@@ -2240,7 +2226,7 @@ void CWallet::AvailableCoins(const uint256 &token, std::vector<COutput>& vCoins,
     }
 }
 
-std::map<CTxDestination, std::vector<COutput>> CWallet::ListCoins(const uint256 &token) const
+std::map<CTxDestination, std::vector<COutput>> CWallet::ListCoins() const
 {
     // TODO: Add AssertLockHeld(cs_wallet) here.
     //
@@ -2255,7 +2241,7 @@ std::map<CTxDestination, std::vector<COutput>> CWallet::ListCoins(const uint256 
     std::map<CTxDestination, std::vector<COutput>> result;
 
     std::vector<COutput> availableCoins;
-    AvailableCoins(token, availableCoins);
+    AvailableCoins(availableCoins);
 
     LOCK2(cs_main, cs_wallet);
     for (auto& coin : availableCoins) {
@@ -2271,7 +2257,6 @@ std::map<CTxDestination, std::vector<COutput>> CWallet::ListCoins(const uint256 
     for (const auto& output : lockedCoins) {
         auto it = mapWallet.find(output.hash);
         if (it != mapWallet.end()) {
-            if (it->second.tx->token != token) continue;
             int depth = it->second.GetDepthInMainChain();
             if (depth >= 0 && output.n < it->second.tx->vout.size() &&
                 IsMine(it->second.tx->vout[output.n]) == ISMINE_SPENDABLE) {
@@ -2509,7 +2494,6 @@ void CWallet::AvailableCoinsForStaking(std::vector<COutput>& vCoins) const
         for (std::map<uint256, CWalletTx>::const_iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
         {
             const CWalletTx* pcoin = &(*it).second;
-            if (!pcoin->tx->token.IsNull()) continue;
 
             int nDepth = pcoin->GetDepthInMainChain();
             if (nDepth < 1)
@@ -2698,7 +2682,7 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
         LOCK2(cs_main, cs_wallet);
         {
             std::vector<COutput> vAvailableCoins;
-            AvailableCoins(uint256(), vAvailableCoins, true, &coin_control, 1, MAX_MONEY, MAX_MONEY, 0, 0, 9999999, txNew.nTime);
+            AvailableCoins(vAvailableCoins, true, &coin_control, 1, MAX_MONEY, MAX_MONEY, 0, 0, 9999999, txNew.nTime);
 
             // Create change script that will be used if we need change
             // TODO: pass in scriptChange instead of reservekey so

@@ -16,8 +16,9 @@
 // TODO remove the following dependencies
 #include <chain.h>
 #include <coins.h>
-#include <galaxycash.h>
 #include <utilmoneystr.h>
+
+#include <galaxycash.h>
 
 bool IsFinalTx(const CTransaction& tx, int nBlockHeight, int64_t nBlockTime)
 {
@@ -158,9 +159,6 @@ bool CheckTransaction(const CTransaction& tx, CValidationState& state, bool fChe
     if (tx.vout.empty())
         return state.DoS(10, false, REJECT_INVALID, "bad-txns-vout-empty");
 
-    if (tx.IsTokenBase() && pgdb->HaveToken(tx.token)) 
-        return state.DoS(100, false, REJECT_INVALID, "bad-txns-token-already-registred");
-
     // Check for negative or overflow output values
     CAmount nValueOut = 0;
     for (const auto& txout : tx.vout) {
@@ -189,7 +187,6 @@ bool CheckTransaction(const CTransaction& tx, CValidationState& state, bool fChe
         }
     }
 
-
     if (tx.IsCoinBase()) {
         if (tx.vin[0].scriptSig.size() < 2 || tx.vin[0].scriptSig.size() > 100)
             return state.DoS(100, false, REJECT_INVALID, "bad-cb-length");
@@ -199,6 +196,35 @@ bool CheckTransaction(const CTransaction& tx, CValidationState& state, bool fChe
                 return state.DoS(10, false, REJECT_INVALID, "bad-txns-prevout-null");
     }
 
+    if (tx.IsTokenBase()) {
+        GalaxyCashToken token;
+        GetTokenInfo(tx, token);
+
+        if (pgdb->HaveToken(token.GetHash())) 
+            return state.DoS(100, false, REJECT_INVALID, "bad-txns-badtokenbase");
+
+        for (const auto& txin : tx.vin) {
+            uint256 hash;
+            if (pgdb->GetTxToken(txin.prevout.hash, hash))
+                return state.DoS(100, false, REJECT_INVALID, "bad-txns-get-prevout-tokenid");
+            if (!hash.IsNull())
+                return state.DoS(100, false, REJECT_INVALID, "bad-txns-tokenbase-collateral-notnative");
+        }   
+    }
+
+    if (tx.IsToken()) {
+
+        if (!pgdb->HaveToken(tx.token)) 
+            return state.DoS(100, false, REJECT_INVALID, "bad-txns-badtokenid");
+
+        for (const auto& txin : tx.vin) {
+            uint256 hash;
+            if (pgdb->GetTxToken(txin.prevout.hash, hash))
+                return state.DoS(100, false, REJECT_INVALID, "bad-txns-get-prevout-tokenid");
+            if (hash != tx.token)
+                return state.DoS(100, false, REJECT_INVALID, "bad-txns-prevout-badtokenid");
+        }   
+    }
     return true;
 }
 
@@ -210,21 +236,11 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
             strprintf("%s: inputs missing/spent", __func__));
     }
 
-
     CAmount nValueIn = 0;
     for (unsigned int i = 0; i < tx.vin.size(); ++i) {
         const COutPoint& prevout = tx.vin[i].prevout;
         const Coin& coin = inputs.AccessCoin(prevout);
         assert(!coin.IsSpent());
-
-        if (tx.IsTokenBase()) {
-            if (!coin.token.IsNull()) 
-                return state.DoS(100, false, REJECT_INVALID, "bad-txns-inputs-tokenbasebadin", false, strprintf("%s: token based inputs in token base", __func__));
-
-        }
-
-        if (!tx.IsTokenBase() && tx.token != coin.token)
-            return state.DoS(100, false, REJECT_INVALID, "bad-txns-inputs-tokenbadin", false, strprintf("%s: inputs not in token chain", __func__));
 
         // If prev is coinbase, check that it's matured
         if ((coin.IsCoinStake() || coin.IsCoinBase()) && nSpendHeight - coin.nHeight < params.nCoinbaseMaturity) {
@@ -233,6 +249,14 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
                 strprintf("tried to spend coinbase or coinstake at depth %d", nSpendHeight - coin.nHeight));
         }
 
+        uint256 prevoutToken;
+        if (!coin.IsCoinBase() && !coin.IsCoinStake()) {
+
+            if (!pgdb->GetTxToken(prevout.hash, prevoutToken))
+                return state.DoS(100, false, REJECT_INVALID, "bad-txns-inputvalues-get-prevout-tokenid");
+            if (tx.IsToken() && tx.token != prevoutToken)
+                return state.DoS(100, false, REJECT_INVALID, "bad-txns-inputvalues-bad-tokenin");
+        }
 
         // galaxycash: check transaction timestamp
         if (coin.nTime > tx.nTime)
@@ -244,12 +268,14 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-inputvalues-outofrange");
         }
     }
-    if (!tx.IsCoinStake() && !tx.IsToken() && !tx.IsTokenBase()) {
+    if (!tx.IsCoinStake()) {
         const CAmount value_out = tx.GetValueOut();
         if (nValueIn < value_out) {
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-in-belowout", false,
                 strprintf("value in (%s) < value out (%s)", FormatMoney(nValueIn), FormatMoney(value_out)));
         }
+        if (tx.IsToken()) return true;
+
         // Tally transaction fees
         const CAmount txfee_aux = nValueIn - value_out;
         if (!MoneyRange(txfee_aux)) {
@@ -260,13 +286,9 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-fee-not-enough");
         txfee = txfee_aux;
     }
-
     if (tx.IsTokenBase()) {
-        const int64_t TOKEN_COLLATERAL = 1 * COIN;
-        if (nValueIn < TOKEN_COLLATERAL) {
-            return state.DoS(100, false, REJECT_INVALID, "bad-txns-token-collateral", false,
-                strprintf("token collateral value (%s) < collateral (%s)", FormatMoney(nValueIn), FormatMoney(TOKEN_COLLATERAL)));
-        }
+        const CAmount TokenCollateral = 1 * COIN;
+        if (nValueIn < TokenCollateral) return state.DoS(100, false, REJECT_INVALID, "bad-txns-tokencollateral-not-enough");
     }
 
     return true;
@@ -275,12 +297,12 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
 CAmount GetMinFee(const CTransaction& tx)
 {
     size_t nBytes = ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION);
-    return GetMinFee(nBytes, tx.nTime, tx.IsTokenBase() || tx.IsToken());
+    return GetMinFee(nBytes, tx.nTime, tx.IsToken() || tx.IsTokenBase());
 }
 
-CAmount GetMinFee(size_t nBytes, uint32_t nTime, const bool fToken)
+CAmount GetMinFee(size_t nBytes, uint32_t nTime, const bool isToken)
 {
-    if (fToken) return 0;
+    if (isToken) return 0;
 
     // Base fee is either MIN_TX_FEE or MIN_RELAY_TX_FEE
     int64_t nBaseFee = MIN_TX_FEE;

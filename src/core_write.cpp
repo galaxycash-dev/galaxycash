@@ -163,9 +163,6 @@ void TxToUniv(const CTransaction& tx, const uint256& hashBlock, UniValue& entry,
     entry.pushKV("time", (int64_t)tx.nTime);
     entry.pushKV("size", (int)::GetSerializeSize(tx, SER_NETWORK, tx.nVersion));
     entry.pushKV("locktime", (int64_t)tx.nLockTime);
-    entry.pushKV("token", tx.token.IsNull() ? "native" : tx.token.GetHex());
-    if (tx.IsTokenBase())
-        entry.pushKV("tokenbase", HexStr(tx.info.begin(), tx.info.end()));
 
     UniValue vin(UniValue::VARR);
     for (unsigned int i = 0; i < tx.vin.size(); i++) {

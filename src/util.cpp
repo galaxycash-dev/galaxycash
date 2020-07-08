@@ -722,20 +722,6 @@ const fs::path& GetDataDir(bool fNetSpecific)
     return path;
 }
 
-fs::path GetModuleDir(bool fNetSpecific)
-{
-    fs::path path = GetDataDir(fNetSpecific) / "modules";
-    fs::create_directories(path);
-    return path;
-}
-
-fs::path GetWorkspaceDir(bool fNetSpecific)
-{
-    fs::path path = GetDataDir(fNetSpecific) / "workspace";
-    fs::create_directories(path);
-    return path;
-}
-
 void ClearDatadirCache()
 {
     LOCK(csPathCached);

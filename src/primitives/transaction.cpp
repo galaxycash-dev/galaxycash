@@ -26,7 +26,7 @@ std::string COutPoint::ToStringShort() const
 
 bool COutPoint::IsMasternodeReward(const CTransaction* tx) const
 {
-    if (!tx->IsCoinStake() || tx->IsTokenBase() || tx->IsToken())
+    if (!tx->IsCoinStake())
         return false;
 
     return (n == tx->vout.size() - 1) && (tx->vout[1].scriptPubKey != tx->vout[n].scriptPubKey);
@@ -78,7 +78,7 @@ std::string CTxOut::ToString() const
 }
 
 CMutableTransaction::CMutableTransaction() : nVersion(CTransaction::CURRENT_VERSION), nTime(GetAdjustedTime()), nLockTime(0) {}
-CMutableTransaction::CMutableTransaction(const CTransaction& tx) : vin(tx.vin), vout(tx.vout), nVersion(tx.nVersion), nTime(tx.nTime), nLockTime(tx.nLockTime), token(tx.token), info(tx.info) {}
+CMutableTransaction::CMutableTransaction(const CTransaction& tx) : vin(tx.vin), vout(tx.vout), nVersion(tx.nVersion), nTime(tx.nTime), nLockTime(tx.nLockTime) {}
 
 uint256 CMutableTransaction::GetHash() const
 {
@@ -92,9 +92,9 @@ uint256 CTransaction::ComputeHash() const
 
 
 /* For backward compatibility, the hash is initialized to 0. TODO: remove the need for this default constructor entirely. */
-CTransaction::CTransaction() : vin(), vout(), nVersion(CTransaction::CURRENT_VERSION), nTime(GetAdjustedTime()), nLockTime(0), hash() {}
-CTransaction::CTransaction(const CMutableTransaction& tx) : vin(tx.vin), vout(tx.vout), nVersion(tx.nVersion), nTime(tx.nTime), nLockTime(tx.nLockTime), hash(ComputeHash()), token(tx.token), info(tx.info) {}
-CTransaction::CTransaction(CMutableTransaction&& tx) : vin(std::move(tx.vin)), vout(std::move(tx.vout)), nVersion(tx.nVersion), nTime(tx.nTime), nLockTime(tx.nLockTime), hash(ComputeHash()), token(tx.token), info(tx.info) {}
+CTransaction::CTransaction() : vin(), vout(), nVersion(CTransaction::CURRENT_VERSION), nTime(GetAdjustedTime()), nLockTime(0), hash(), token(uint256()), data() {}
+CTransaction::CTransaction(const CMutableTransaction& tx) : vin(tx.vin), vout(tx.vout), nVersion(tx.nVersion), nTime(tx.nTime), nLockTime(tx.nLockTime), hash(ComputeHash()), token(tx.token), data(tx.data) {}
+CTransaction::CTransaction(CMutableTransaction&& tx) : vin(std::move(tx.vin)), vout(std::move(tx.vout)), nVersion(tx.nVersion), nTime(tx.nTime), nLockTime(tx.nLockTime), hash(ComputeHash()), token(tx.token), data(std::move(tx.data)) {}
 
 
 CAmount CTransaction::GetValueOut() const
@@ -116,7 +116,7 @@ unsigned int CTransaction::GetTotalSize() const
 std::string CTransaction::ToString() const
 {
     std::string str;
-    str += IsCoinBase() ? "Coinbase" : (IsCoinStake() ? "Coinstake" : (IsTokenBase() ? "Tokenbase" : "CTransaction"));
+    str += IsCoinBase() ? "Coinbase" : (IsCoinStake() ? "Coinstake" : "CTransaction");
     str += strprintf("(hash=%s, nTime=%d, ver=%d, vin.size=%u, vout.size=%u, nLockTime=%u)\n",
         GetHash().ToString().substr(0, 10),
         nTime,

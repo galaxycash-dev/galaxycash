@@ -31,8 +31,6 @@ bool GalaxyCashDB::AddToken(const GalaxyCashToken& token)
 {
     uint256 hash = token.GetHash();
     if (Exists(hash)) return false;
-
-    
     if (!Write(hash, token)) return false;
     std::string str = token.name; str_tolower(str);
     uint256 hash2 = SerializeHash(str + "-nm");
@@ -40,7 +38,6 @@ bool GalaxyCashDB::AddToken(const GalaxyCashToken& token)
     str = token.symbol; str_tolower(str);
     hash2 = SerializeHash(str + "-sym");
     if (!Write(hash2, hash)) return false;
-
     return true;
 }
 
@@ -53,7 +50,6 @@ bool GalaxyCashDB::SetToken(const uint256 &hash, const GalaxyCashToken& token)
     str = token.symbol; str_tolower(str);
     hash2 = SerializeHash(str + "-sym");
     if (!Write(hash2, hash)) return false;
-
     return true;
 }
 
@@ -75,11 +71,22 @@ bool GalaxyCashDB::RemoveToken(const uint256 &hash)
 
 bool GalaxyCashDB::AccessToken(const uint256 &hash, GalaxyCashToken& token)
 {
+    if (hash.IsNull()) {
+        token.name = "GalaxyCash";
+        token.symbol = "GCH";
+        return true;
+    }
     return Read(hash, token);
 }
 
 bool GalaxyCashDB::AccessTokenByName(const std::string &str, GalaxyCashToken& token)
 {
+    if (str == "GalaxyCash") {
+        token.name = "GalaxyCash";
+        token.symbol = "GCH";
+        return true;
+    }
+
     std::string str2 = str; str_tolower(str2);
     uint256 hash = SerializeHash(str2 + "-nm");
     uint256 hash2;
@@ -89,6 +96,12 @@ bool GalaxyCashDB::AccessTokenByName(const std::string &str, GalaxyCashToken& to
 
 bool GalaxyCashDB::AccessTokenBySymbol(const std::string &str, GalaxyCashToken& token)
 {
+    if (str == "GCH") {
+        token.name = "GalaxyCash";
+        token.symbol = "GCH";
+        return true;
+    }
+
     std::string str2 = str; str_tolower(str2);
 
     uint256 hash = SerializeHash(str2 + "-sym");
@@ -99,5 +112,34 @@ bool GalaxyCashDB::AccessTokenBySymbol(const std::string &str, GalaxyCashToken& 
 
 bool GalaxyCashDB::HaveToken(const uint256 &hash)
 {
+    if (hash.IsNull()) return true;
     return Exists(hash);
+}
+
+bool GalaxyCashDB::SetTxToken(const uint256 &hash, const uint256 &token) {
+    return Write(SerializeHash(hash.GetHex() + "-tx"), token);
+}
+
+bool GalaxyCashDB::GetTxToken(const uint256 &hash, uint256 &token) {
+    return Read(SerializeHash(hash.GetHex() + "-tx"), token);
+}
+
+void SetTokenInfo(CMutableTransaction &tx, const GalaxyCashToken &token) {
+    CDataStream s(SER_NETWORK, PROTOCOL_VERSION);
+    s << token;
+    tx.data = std::vector<unsigned char>(s.uptr(), s.uptr() + s.size());
+}
+
+bool GetTokenInfo(const CMutableTransaction &tx, GalaxyCashToken &token) {
+    if (tx.data.empty()) return false;
+    CDataStream s(tx.data, SER_NETWORK, PROTOCOL_VERSION);
+    s >> token;
+    return true;
+}
+
+bool GetTokenInfo(const CTransaction &tx, GalaxyCashToken &token) {
+    if (tx.data.empty()) return false;
+    CDataStream s(tx.data, SER_NETWORK, PROTOCOL_VERSION);
+    s >> token;
+    return true;
 }

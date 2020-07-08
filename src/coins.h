@@ -20,7 +20,6 @@
 
 #include <unordered_map>
 
-
 /**
  * A UTXO entry.
  *
@@ -46,13 +45,9 @@ public:
     // galaxycash: transaction timestamp
     unsigned int nTime;
 
-    // galaxycash: token id
-    uint256 token;
-
-
     //! construct a Coin from a CTxOut and height/coinbase information.
-    Coin(CTxOut&& outIn, int nHeightIn, bool fCoinBaseIn, bool fCoinStakeIn, int nTimeIn, const uint256 &token) : out(std::move(outIn)), fCoinBase(fCoinBaseIn), nHeight(nHeightIn), fCoinStake(fCoinStakeIn), nTime(nTimeIn), token(token) {}
-    Coin(const CTxOut& outIn, int nHeightIn, bool fCoinBaseIn, bool fCoinStakeIn, int nTimeIn, const uint256 &token) : out(outIn), fCoinBase(fCoinBaseIn), nHeight(nHeightIn), fCoinStake(fCoinStakeIn), nTime(nTimeIn), token(token) {}
+    Coin(CTxOut&& outIn, int nHeightIn, bool fCoinBaseIn, bool fCoinStakeIn, int nTimeIn) : out(std::move(outIn)), fCoinBase(fCoinBaseIn), nHeight(nHeightIn), fCoinStake(fCoinStakeIn), nTime(nTimeIn) {}
+    Coin(const CTxOut& outIn, int nHeightIn, bool fCoinBaseIn, bool fCoinStakeIn, int nTimeIn) : out(outIn), fCoinBase(fCoinBaseIn), nHeight(nHeightIn), fCoinStake(fCoinStakeIn), nTime(nTimeIn) {}
 
     void Clear()
     {
@@ -61,7 +56,6 @@ public:
         nHeight = 0;
         fCoinStake = false;
         nTime = 0;
-        token.SetNull();
     }
 
     //! empty constructor
@@ -77,10 +71,6 @@ public:
         return fCoinStake;
     }
 
-    bool IsToken() const {
-        return !token.IsNull();
-    }
-
     template <typename Stream>
     void Serialize(Stream& s) const
     {
@@ -89,12 +79,10 @@ public:
         ::Serialize(s, VARINT(code));
         ::Serialize(s, CTxOutCompressor(REF(out)));
         // galaxycash flags
-        unsigned int nFlag = 0;
-        if (fCoinStake) nFlag |= (1 << 0);
+        unsigned int nFlag = fCoinStake ? 1 : 0;
         ::Serialize(s, VARINT(nFlag));
         // galaxycash transaction timestamp
         ::Serialize(s, VARINT(nTime));
-        ::Serialize(s, token);
     }
 
     template <typename Stream>
@@ -108,10 +96,9 @@ public:
         // galaxycash flags
         unsigned int nFlag = 0;
         ::Unserialize(s, VARINT(nFlag));
-        fCoinStake = nFlag & (1 << 0);
+        fCoinStake = nFlag & 1;
         // galaxycash transaction timestamp
         ::Unserialize(s, VARINT(nTime));
-        ::Unserialize(s, token);
     }
 
     bool IsSpent() const
@@ -252,7 +239,6 @@ protected:
      */
     mutable uint256 hashBlock;
     mutable CCoinsMap cacheCoins;
-
 
     /* Cached dynamic memory usage for the inner Coin objects. */
     mutable size_t cachedCoinsUsage;

@@ -227,7 +227,6 @@ libgalaxycash_server_a_SOURCES = \
   rpc/safemode.cpp \
   rpc/server.cpp \
   rpc/masternode.cpp \
-  rpc/token.cpp \
   script/sigcache.cpp \
   script/ismine.cpp \
   timedata.cpp \
@@ -423,14 +422,11 @@ endif
 LIBGALAXYCASH = libgalaxycash.a
 EXTRA_LIBRARIES += $(LIBGALAXYCASH)
 
-
 LIBGALAXYCASH_CPPFLAGS = $(BITCOIN_INCLUDES) -I$(srcdir)
-
 
 
 libgalaxycash_a_CPPFLAGS = $(AM_CPPFLAGS) $(LIBGALAXYCASH_CPPFLAGS)
 libgalaxycash_a_CXXFLAGS = $(AM_CXXFLAGS) "-std=c++17" $(PIE_FLAGS)
-
 
 libgalaxycash_a_SOURCES =
 libgalaxycash_a_SOURCES += \

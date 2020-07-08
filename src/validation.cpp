@@ -39,7 +39,6 @@
 #include <validation.h>
 #include <validationinterface.h>
 #include <warnings.h>
-#include <galaxycash.h>
 
 #include <bignum.h>
 #include <kernel.h>
@@ -52,6 +51,8 @@
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/thread.hpp>
+
+#include <galaxycash.h>
 
 
 #if defined(NDEBUG)
@@ -534,11 +535,6 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
     LOCK(pool.cs); // mempool "read lock" (held through GetMainSignals().TransactionAddedToMempool())
     if (pfMissingInputs) {
         *pfMissingInputs = false;
-    }
-
-    if (tx.IsToken() || tx.IsTokenBase() || tx.IsBurned()) {
-        if (chainActive.Height() < chainparams.GetConsensus().ECOHeight)
-            return state.DoS(100, false, REJECT_INVALID, "ECO based tx, ECO not deployed yet.");
     }
 
     if (!CheckTransaction(tx, state))
@@ -1207,8 +1203,7 @@ bool CheckInputs(const CTransaction& tx, CValidationState& state, const CCoinsVi
                 const COutPoint& prevout = tx.vin[i].prevout;
                 const Coin& coin = inputs.AccessCoin(prevout);
                 assert(!coin.IsSpent());
-                if (!tx.IsTokenBase() && coin.token != tx.token) return state.DoS(100, false, REJECT_INVALID, strprintf("bad input"));
-                if (tx.IsTokenBase() && !coin.token.IsNull()) return state.DoS(100, false, REJECT_INVALID, strprintf("bad input"));
+
 
                 // Verify signature
                 CScriptCheck check(coin.out, tx, i, flags, cacheSigStore, &txdata);
@@ -1351,7 +1346,6 @@ int ApplyTxInUndo(Coin&& undo, CCoinsViewCache& view, const COutPoint& out)
             undo.nHeight = alternate.nHeight;
             undo.fCoinBase = alternate.fCoinBase;
             undo.fCoinStake = alternate.fCoinStake; // galaxycash
-            undo.token = alternate.token;
             undo.nTime = alternate.nTime;           // galaxycash
         } else {
             return DISCONNECT_FAILED; // adding output for transaction without known metadata
@@ -1389,7 +1383,6 @@ DisconnectResult CChainState::DisconnectBlock(const CBlock& block, const CBlockI
         uint256 hash = tx.GetHash();
         bool is_coinbase = tx.IsCoinBase();
         bool is_coinstake = tx.IsCoinStake();
-        uint256 token = tx.token;
 
         // Check that all outputs are available and match the outputs in the block itself
         // exactly.
@@ -1398,16 +1391,10 @@ DisconnectResult CChainState::DisconnectBlock(const CBlock& block, const CBlockI
                 COutPoint out(hash, o);
                 Coin coin;
                 bool is_spent = view.SpendCoin(out, &coin);
-                if (!is_spent || tx.vout[o] != coin.out || pindex->nHeight != coin.nHeight || is_coinbase != coin.fCoinBase || is_coinstake != coin.fCoinStake || token != coin.token) {
+                if (!is_spent || tx.vout[o] != coin.out || pindex->nHeight != coin.nHeight || is_coinbase != coin.fCoinBase || is_coinstake != coin.fCoinStake) {
                     fClean = false; // transaction output mismatch
                 }
             }
-        }
-
-        if (tx.IsTokenBase()) {
-            CDataStream s((const char *) tx.info.data(), (const char *)(tx.info.data() + tx.info.size()), (SER_NETWORK | SER_GALAXYCASH | SER_GALAXYCASH_ECO), PROTOCOL_VERSION);
-            GalaxyCashToken token; s >> token;
-            pgdb->RemoveToken(token.GetHash());
         }
 
         // restore inputs
@@ -1655,7 +1642,6 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     std::vector<int> prevheights;
     CAmount nFees = 0;
     CAmount nReward = 0;
-    int64_t nBurned = 0;
     int64_t nValueIn = 0;
     int64_t nValueOut = 0;
     int nInputs = 0;
@@ -1666,28 +1652,14 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     for (unsigned int i = 0; i < block.vtx.size(); i++) {
         const CTransaction& tx = *(block.vtx[i]);
 
-        if (tx.IsTokenBase() || tx.IsBurned() || tx.IsToken()) {
-            if (pindex->nHeight < chainparams.GetConsensus().ECOHeight)
-                return error("%s: Token ecosystem not deployed, bad tx with ECO features: %s, %s", __func__, tx.GetHash().ToString(), FormatStateMessage(state));
-        }
-
-        if (tx.IsTokenBase()) {
-            
-            CDataStream s((const char*) tx.info.data(), (const char *)(tx.info.data() + tx.info.size()), (SER_NETWORK | SER_GALAXYCASH | SER_GALAXYCASH_ECO), PROTOCOL_VERSION);
-            GalaxyCashToken token; s >> token;
-
-            if (pgdb->HaveToken(token.GetHash()))
-                return error("%s: GalaxyCashDB::HaveToken: token \"%s\" already deployed %s", __func__, tx.GetHash().ToString());
-
-            pgdb->AddToken(token);
-        }
+        pgdb->SetTxToken(tx.GetHash(), tx.token);
 
         nInputs += tx.vin.size();
 
         if (tx.IsCoinBase()) {
             nReward = tx.GetValueOut();
             nValueOut += nReward;
-        } else if (!tx.IsTokenBase()) {
+        } else {
             CAmount txfee = 0;
             if (!Consensus::CheckTxInputs(tx, state, view, pindex->nHeight, txfee, chainparams.GetConsensus())) {
                 return error("%s: Consensus::CheckTxInputs: %s, %s", __func__, tx.GetHash().ToString(), FormatStateMessage(state));
@@ -1695,10 +1667,10 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
             int64_t nValueA = view.GetValueIn(tx);
             int64_t nValueB = tx.GetValueOut();
 
-            nValueIn += tx.IsBurned() ? 0 : nValueA;
-            nValueOut += tx.IsBurned() ? 0 : nValueB;
+            nValueIn += nValueA;
+            nValueOut += nValueB;
 
-            if (!tx.IsCoinStake() && !tx.IsToken())
+            if (!tx.IsCoinStake())
                 nFees += txfee;
             if (tx.IsCoinStake())
                 nReward = nValueOut - nValueIn;
@@ -1720,18 +1692,6 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
                 return state.DoS(100, error("%s: contains a non-BIP68-final transaction", __func__),
                     REJECT_INVALID, "bad-txns-nonfinal");
             }
-
-            
-            if (tx.IsBurned() && !tx.IsToken())
-                nBurned += nValueA;
-            else {
-                GalaxyCashToken token; 
-                if (pgdb->AccessToken(tx.token, token)) {
-                    token.supply -= nValueA;
-                    pgdb->SetToken(tx.token, token);
-                }
-            }
-
         }
 
         // GetTransactionSigOpCost counts 3 types of sigops:
@@ -1787,7 +1747,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
 
     // galaxycash: track money supply and mint amount info
     pindex->nMint = nValueOut - nValueIn + nFees;
-    pindex->nMoneySupply = ((pindex->pprev ? pindex->pprev->nMoneySupply : 0) + (nValueOut - nValueIn)) - nBurned;
+    pindex->nMoneySupply = (pindex->pprev ? pindex->pprev->nMoneySupply : 0) + nValueOut - nValueIn;
 
     // galaxycash: fees are not collected by miners as in galaxycash
     // galaxycash: fees are destroyed to compensate the entire network
@@ -1903,12 +1863,6 @@ bool static FlushStateToDisk(const CChainParams& chainparams, CValidationState& 
                 if (!pcoinsTip->Flush())
                     return AbortNode(state, "Failed to write to coin database");
                 nLastFlush = nNow;
-            }
-                        // Flush best chain related state. This can only be done if the blocks / block index write was also done.
-            if (fDoFullFlush) {
-                // Flush the chainstate (which may refer to block index entries).
-                if (!pgdb->Flush())
-                    return AbortNode(state, "Failed to write to gdb database");
             }
         }
         if (fDoFullFlush || ((mode == FLUSH_STATE_ALWAYS || mode == FLUSH_STATE_PERIODIC) && nNow > nLastSetChain + (int64_t)DATABASE_WRITE_INTERVAL * 1000000)) {
@@ -2782,20 +2736,8 @@ static bool FindUndoPos(CValidationState& state, int nFile, CDiskBlockPos& pos, 
 
 static bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW = true, bool fCheckSignature = true, bool fOldClient = false)
 {
-    CBlockIndex* pindexPrev = chainActive.Tip();
-    int nHeight = 0;
-    if (pindexPrev != NULL) {
-        if (pindexPrev->GetBlockHash() == block.hashPrevBlock) {
-            nHeight = pindexPrev->nHeight + 1;
-        } else { //out of order
-            BlockMap::iterator mi = mapBlockIndex.find(block.hashPrevBlock);
-            if (mi != mapBlockIndex.end() && (*mi).second)
-                nHeight = (*mi).second->nHeight + 1;
-        }
-    }
-
     // Check proof of work matches claimed amount
-    if (fCheckPOW && !(block.nFlags & CBlockIndex::BLOCK_SUBSIDY || nHeight < 600000) && !CheckProofOfWork(block.GetHash(), block.nBits, consensusParams)) {
+    if (fCheckPOW && !(block.nFlags & CBlockIndex::BLOCK_SUBSIDY) && !CheckProofOfWork(block.GetHash(), block.nBits, consensusParams)) {
         if (fOldClient)
             return true;
         else
@@ -2807,8 +2749,6 @@ static bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state,
 
 bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW, bool fCheckMerkleRoot, bool fCheckSignature, bool fOldClient)
 {
-    if (block.fChecked)
-        return true;
     CBlockIndex* pindexPrev = chainActive.Tip();
     int nHeight = 0;
     if (pindexPrev != NULL) {
@@ -2820,14 +2760,14 @@ bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::P
                 nHeight = (*mi).second->nHeight + 1;
         }
     }
+
     // These are checks that are independent of context.
-    if (block.IsDeveloperBlock() && nHeight < 600000) {
+    if (block.IsDeveloperBlock() && nHeight < consensusParams.SubsidyStopHeight) {
         block.fChecked = true;
         return true;
-    } else {
-        if (block.IsDeveloperBlock()) return state.DoS(100, false, REJECT_INVALID, "bad-blk", true, "Developer subsidy will disabled after 600,000 block.");
     }
-
+    if (block.fChecked)
+        return true;
 
     // Check the merkle root.
     if (fCheckMerkleRoot) {
@@ -2878,9 +2818,6 @@ bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::P
 
     // Check transactions
     for (const auto& tx : block.vtx) {
-        if ((tx->IsTokenBase() || tx->IsToken() || tx->IsBurned()) && consensusParams.ECOHeight > nHeight)
-            return state.Invalid(false, state.GetRejectCode(), state.GetRejectReason(),
-                strprintf("Extended Transaction (tx hash %s) ECO not deployed yet", tx->GetHash().ToString()));
         if (!CheckTransaction(*tx, state, true))
             return state.Invalid(false, state.GetRejectCode(), state.GetRejectReason(),
                 strprintf("Transaction check failed (tx hash %s) %s", tx->GetHash().ToString(), state.GetDebugMessage()));
@@ -2890,16 +2827,15 @@ bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::P
     }
 
     // masternode payments / budgets
-    {
-        if (nHeight != 0 && !IsInitialBlockDownload()) {
-            // check masternode/budget payment
-            if (!IsBlockPayeeValid(block, nHeight)) { 
-                error("%s : Couldn't find masternode/budget payment for block %i", __func__, nHeight);
-            }
-        } else {
-            LogPrint(BCLog::MASTERNODE, "%s: Masternode payment check skipped on sync - skipping IsBlockPayeeValid()\n", __func__);
+    if (nHeight != 0 && !IsInitialBlockDownload()) {
+        // check masternode/budget payment
+        if (!IsBlockPayeeValid(block, nHeight)) { 
+            error("%s : Couldn't find masternode/budget payment for block %i", __func__, nHeight);
         }
+    } else {
+        LogPrint(BCLog::MASTERNODE, "%s: Masternode payment check skipped on sync - skipping IsBlockPayeeValid()\n", __func__);
     }
+
 
     unsigned int nSigOps = 0;
     for (const auto& tx : block.vtx) {
@@ -3022,12 +2958,9 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
         return true;
     if (pindexPrev == NULL)
         return state.DoS(10, false, REJECT_INVALID, "bad-prev-blk", false, "Bad previous block");
+    if (block.IsDeveloperBlock()) return true;
 
     const int nHeight = pindexPrev->nHeight + 1;
-
-    if (block.IsDeveloperBlock() && nHeight < 600000) return true;
-
-    
 
     int nLockTimeFlags = 0;
     if (pindexPrev) {
@@ -3058,8 +2991,8 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
 
     // Checking difficulty
     const Consensus::Params& consensusParams = Params().GetConsensus();
-    if (!(block.nFlags & CBlockIndex::BLOCK_SUBSIDY || nHeight >= 600000) && (pindexPrev->nHeight >= consensusParams.nLastPoW)) {
-        int nDiffBits = pindexPrev ? GetNextTargetRequired(pindexPrev, block.GetAlgorithm(), block.IsProofOfStake(), consensusParams) : consensusParams.powLimit.GetCompact();
+    if (!(block.nFlags & CBlockIndex::BLOCK_SUBSIDY) && (pindexPrev->nHeight >= consensusParams.nLastPoW)) {
+        int nDiffBits = pindexPrev ? GetNextTargetRequired(pindexPrev, CBlockHeader::ALGO_X12, true, consensusParams) : consensusParams.powLimit.GetCompact();
         if (block.nBits != nDiffBits) 
             return state.Invalid(false, REJECT_INVALID, "bad-diffbits", "bad difficulty");
     }
@@ -3085,16 +3018,15 @@ bool CChainState::AcceptBlockHeader(const CBlockHeader& block, bool fProofOfStak
             return true;
         }
 
-                // Get prev block index
+        // Get prev block index
         CBlockIndex* pindexPrev = nullptr;
         BlockMap::iterator mi = mapBlockIndex.find(block.hashPrevBlock);
         if (mi == mapBlockIndex.end())
             return state.DoS(10, error("%s: prev block not found", __func__), 0, "prev-blk-not-found");
         pindexPrev = (*mi).second;
 
-        int nHeight = pindexPrev->nHeight + 1;
-
-        if ((!(block.nFlags & CBlockIndex::BLOCK_SUBSIDY) || nHeight >= 600000) && !CheckBlockHeader(block, state, chainparams.GetConsensus(), !fProofOfStake, fProofOfStake, fOldClient)) {
+        bool isSubsidy = (block.nFlags & CBlockIndex::BLOCK_SUBSIDY) && (pindexPrev->nHeight < chainparams.GetConsensus().SubsidyStopHeight);
+        if (!isSubsidy && !CheckBlockHeader(block, state, chainparams.GetConsensus(), !fProofOfStake, fProofOfStake, fOldClient)) {
             if (fOldClient)
                 fSetAsPos = !fProofOfStake; // our guess was wrong - correct it
             else {
@@ -3102,7 +3034,6 @@ bool CChainState::AcceptBlockHeader(const CBlockHeader& block, bool fProofOfStak
                 return error("%s: Consensus::CheckBlockHeader: %s, %s", __func__, hash.ToString(), FormatStateMessage(state));
             }
         }
-
 
 
         if (pindexPrev->nStatus & BLOCK_FAILED_MASK) {
@@ -3205,7 +3136,7 @@ bool CBlockIndex::CheckProofOfStake(const CBlock& block)
 {
     if (!block.IsProofOfStake())
         return true;
-    if (block.IsDeveloperBlock() && nHeight < 600000)
+    if (block.IsDeveloperBlock())
         return true;
 
     if (!::CheckKernel(pprev, block.nBits, *block.vtx[1], &hashProofOfStake)) {
@@ -3218,7 +3149,7 @@ bool CBlockIndex::CheckProofOfWork(const CBlock& block)
 {
     if (!block.IsProofOfWork())
         return true;
-    if (block.IsDeveloperBlock() && nHeight < 600000)
+    if (block.IsDeveloperBlock())
         return true;
 
     if (!::CheckProofOfWork(block.GetPoWHash(), block.nBits, Params().GetConsensus()))
@@ -3260,7 +3191,8 @@ bool CChainState::AcceptBlock(const std::shared_ptr<const CBlock>& pblock, CVali
         return state.DoS(100, false, REJECT_INVALID, "bad-block-type", false, "proof of stake wave is not started");      
     }
 
-    if ((!pblock->IsDeveloperBlock() || nHeight >= 600000) && pblock->IsProofOfWork() && (nHeight > chainparams.GetConsensus().nLastPoW)) {
+    bool isNotSubsidy = !(pblock->IsDeveloperBlock() && (nHeight < chainparams.GetConsensus().SubsidyStopHeight));
+    if (isNotSubsidy && pblock->IsProofOfWork() && (nHeight > chainparams.GetConsensus().nLastPoW)) {
         pindex->nStatus |= BLOCK_FAILED_VALID;
         setDirtyBlockIndex.insert(pindex);
         return state.DoS(100, false, REJECT_INVALID, "bad-block-type", false, "proof of work wave is ended");      

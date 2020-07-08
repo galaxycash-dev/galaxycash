@@ -14,11 +14,10 @@ static const int DATABASE_VERSION = 90909;
  * network protocol versioning
  */
 
-static const int PROTOCOL_VERSION = 95550;
+static const int PROTOCOL_VERSION = 94440;
 static const int NEW_VERSION = 94000;            // galaxycash: used to communicate with clients knows about galaxycash new protocol
 static const int OLD_VERSION = 90920;            // galaxycash: used to communicate with clients that don't know how to send PoS information in headers
 static const int MIN_MASTERNODE_VERSION = 90920; // galaxycash: minimal masternode protocol version
-static const int ECO_VERSION = 95550;
 
 //! initial proto version, to be increased after version/verack negotiation
 static const int INIT_PROTO_VERSION = 90918;
