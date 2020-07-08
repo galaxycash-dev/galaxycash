@@ -614,8 +614,6 @@ static const CRPCCommand commands[] =
     { "util",               "verifymessage",          &verifymessage,          {"address","signature","message"} },
     { "util",               "signmessagewithprivkey", &signmessagewithprivkey, {"privkey","message"} },
 
-    /* script */
-    { "script",             "run",                    &runscript,              {"file"}},
 
     /* Not shown in help */
     { "hidden",             "setmocktime",            &setmocktime,            {"timestamp"}},

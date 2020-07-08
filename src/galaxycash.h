@@ -36,8 +36,7 @@
 class GalaxyCashToken {
 public:
     std::string name, symbol;
-    int64_t supply, reward;
-    bool minable;
+    int64_t supply;
 
     ADD_SERIALIZE_METHODS;
 
@@ -46,21 +45,17 @@ public:
     {
         READWRITE(name);
         READWRITE(symbol);
-        READWRITE(reward);
-        READWRITE(minable);
         if (!(s.GetType() & SER_GETHASH)) READWRITE(supply);
     }
 
-    GalaxyCashToken() : supply(0), reward(0), minable(false) { }
-    GalaxyCashToken(const GalaxyCashToken& token) : name(token.name), symbol(token.symbol), supply(token.supply), reward(token.reward), minable(token.minable) {}
+    GalaxyCashToken() : supply(0) { }
+    GalaxyCashToken(const GalaxyCashToken& token) : name(token.name), symbol(token.symbol), supply(token.supply) {}
 
     GalaxyCashToken& operator=(const GalaxyCashToken& token)
     {
         name = token.name;
         symbol = token.symbol;
         supply = token.supply;
-        reward = token.reward;
-        minable = token.minable;
         return *this;
     }
 
@@ -68,8 +63,7 @@ public:
     {
         name.clear();
         symbol.clear();
-        supply = reward = 0;
-        minable = false;
+        supply = 0;
     }
 
     bool IsNull() const
@@ -77,35 +71,14 @@ public:
         return name.empty() || symbol.empty();
     }
 
-    uint256 GetHash() const { return SerializeHash(*this); }
-};
+    bool IsNative() const;
 
-class GalaxyCashPoWWork {
-public:
-    uint256 hashPrevBlock;
-    uint32_t nBits, nNonce, nExtraNonce;
-    int64_t nValue;
-    std::vector<unsigned char> vchWorkSig;
-
-    GalaxyCashPoWWork() : nBits(0), nNonce(0), nExtraNonce(0), nValue(0) {}
-    GalaxyCashPoWWork(const GalaxyCashPoWWork &work) : hashPrevBlock(work.hashPrevBlock), nBits(work.nBits), nNonce(work.nNonce), nExtraNonce(work.nExtraNonce), nValue(work.nValue), vchWorkSig(work.vchWorkSig) {}
-
-    ADD_SERIALIZE_METHODS;
-
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action)
-    {
-        READWRITE(hashPrevBlock);
-        READWRITE(nBits);
-        READWRITE(nNonce);
-        READWRITE(nExtraNonce);
-        READWRITE(nValue);
-        if (!(s.GetType() & SER_GETHASH)) READWRITE(vchWorkSig);
+    uint256 GetHash() const { 
+        if (IsNative()) return uint256();
+        return SerializeHash(*this); 
     }
-
-    uint256 GetPoWHash() const { return HashX12(BEGIN(hashPrevBlock), END(nValue)); }
-    uint256 GetHash() const { return SerializeHash(*this); }
 };
+
 
 class GalaxyCashDB : public CDBWrapper
 {
@@ -116,8 +89,17 @@ public:
 
     GalaxyCashDB(size_t nCacheSize, bool fMemory = false, bool fWipe = false);
 
+    bool SetTokens(const std::vector<uint256> &tokens);
+    bool GetTokens(std::vector<uint256> &tokens);
+
     bool SetTxToken(const uint256 &txid, const uint256 &token);
     bool GetTxToken(const uint256 &txid, uint256 &token);
+
+    bool SetGenesisTx(const uint256 &token, const uint256 &txid);
+    bool GetGenesisTx(const uint256 &token, uint256 &txid);
+
+    uint256 TokenIdByName(const std::string &str);
+    uint256 TokenIdBySymbol(const std::string &str);
 
     bool AddToken(const GalaxyCashToken &token);
     bool SetToken(const uint256 &hash, const GalaxyCashToken &token);
@@ -126,11 +108,6 @@ public:
     bool HaveToken(const uint256 &hash);
     bool AccessTokenByName(const std::string& name, GalaxyCashToken& token);
     bool AccessTokenBySymbol(const std::string& symbol, GalaxyCashToken& token);
-
-    bool SetPoWWorks(const uint256 &hash, const std::vector<GalaxyCashPoWWork> &works);
-    bool GetPoWWorks(const uint256 &hash, std::vector<GalaxyCashPoWWork> &works);
-
-    bool GenerateNextPoWWork(const uint256 &hash, GalaxyCashPoWWork &work);
 };
     
 void SetTokenInfo(CMutableTransaction &tx, const GalaxyCashToken &token);

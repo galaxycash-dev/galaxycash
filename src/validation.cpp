@@ -1384,6 +1384,12 @@ DisconnectResult CChainState::DisconnectBlock(const CBlock& block, const CBlockI
         bool is_coinbase = tx.IsCoinBase();
         bool is_coinstake = tx.IsCoinStake();
 
+        if (tx.IsTokenBase()) {
+            GalaxyCashToken tokenInfo;
+            if (GetTokenInfo(tx, tokenInfo))
+                pgdb->RemoveToken(tokenInfo.GetHash());
+        }
+
         // Check that all outputs are available and match the outputs in the block itself
         // exactly.
         for (size_t o = 0; o < tx.vout.size(); o++) {
@@ -1652,7 +1658,24 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     for (unsigned int i = 0; i < block.vtx.size(); i++) {
         const CTransaction& tx = *(block.vtx[i]);
 
-        pgdb->SetTxToken(tx.GetHash(), tx.token);
+        uint256 token = uint256();
+
+        if (tx.IsTokenBase()) {
+            GalaxyCashToken tokenInfo;
+            if (!GetTokenInfo(tx, tokenInfo))
+                return state.DoS(100, error("%s: failed to get new token info.", __func__), REJECT_INVALID, "bad-txns-badtokeninfo");
+
+            token = tokenInfo.GetHash();
+            if (pgdb->HaveToken(token))
+                return state.DoS(100, error("%s: token already registred", __func__), REJECT_INVALID, "bad-txns-badtokeninfo");
+            if (!pgdb->AddToken(tokenInfo))
+                return state.DoS(100, error("%s: failed to add new token to db", __func__), REJECT_INVALID, "bad-txns-badtoken");
+            if (!pgdb->SetGenesisTx(token, tx.GetHash()))      
+                return state.DoS(100, error("%s: failed to set genesis tx for new token", __func__), REJECT_INVALID, "bad-txns-badtoken");              
+        } else if (tx.IsToken()) 
+            token = tx.token;
+
+        pgdb->SetTxToken(tx.GetHash(), token);
 
         nInputs += tx.vin.size();
 

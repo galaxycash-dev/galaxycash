@@ -227,6 +227,7 @@ libgalaxycash_server_a_SOURCES = \
   rpc/safemode.cpp \
   rpc/server.cpp \
   rpc/masternode.cpp \
+  rpc/token.cpp \
   script/sigcache.cpp \
   script/ismine.cpp \
   timedata.cpp \

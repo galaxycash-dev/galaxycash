@@ -54,13 +54,41 @@ UniValue istoken(const JSONRPCRequest& request)
     if (request.fHelp || request.params.size() != 1)
         throw std::runtime_error(
             "istoken \"hash\"\n"
-            "\nCommand to check token by hash\n"
+            "\nCommand to check token by id\n"
 
             "\nArguments:\n"
             "1. \"hash\"        (string) hash\n");
 
 
-    return false;
+    return pgdb->HaveToken(uint256S(request.params[0].get_str()));
+}
+
+UniValue tokenidbyname(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 1)
+        throw std::runtime_error(
+            "tokenidbyname \"name\"\n"
+            "\nCommand to get token id by name\n"
+
+            "\nArguments:\n"
+            "1. \"name\"        (string) name of token\n");
+
+
+    return pgdb->TokenIdByName(request.params[0].get_str()).GetHex();
+}
+
+UniValue tokenidbysymbol(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 1)
+        throw std::runtime_error(
+            "tokenidbysymbol \"symbol\"\n"
+            "\nCommand to get token id by symbol\n"
+
+            "\nArguments:\n"
+            "1. \"name\"        (string) symbol of token\n");
+
+
+    return pgdb->TokenIdBySymbol(request.params[0].get_str()).GetHex();
 }
 
 UniValue tokeninfo(const JSONRPCRequest& request)
@@ -73,24 +101,38 @@ UniValue tokeninfo(const JSONRPCRequest& request)
             "\nArguments:\n"
             "1. \"hash\"        (string) hash\n");
 
-
+    GalaxyCashToken tokenInfo;
+    if (pgdb->AccessToken(uint256S(request.params[0].get_str()), tokenInfo)) {
+        UniValue obj(UniValue::VOBJ);
+        obj.push_back(Pair("id", tokenInfo.GetHash().GetHex()));
+        obj.push_back(Pair("name", tokenInfo.name));
+        obj.push_back(Pair("symbol", tokenInfo.symbol));
+        obj.push_back(Pair("supply", ValueFromAmount(tokenInfo.supply)));
+        uint256 genesisTx;
+        if (pgdb->GetGenesisTx(tokenInfo.GetHash(), genesisTx))
+            obj.push_back(Pair("txid", genesisTx.GetHex()));
+        return obj;
+    }
     return false;
 }
 
-UniValue tokenbalance(const JSONRPCRequest& request)
+UniValue tokenlist(const JSONRPCRequest& request)
 {
-    if (request.fHelp || request.params.size() != 1)
+    if (request.fHelp)
         throw std::runtime_error(
-            "tokenbalance \"hash\" [address]\n"
-            "\nCommand to get token balance by hash\n"
+            "tokenlist\n"
+            "\nCommand to get registred tokens list\n");
 
-            "\nArguments:\n"
-            "1. \"hash\"        (string) hash\n"
-            "1. \"address\"     (string) address\n");
-
-
-    return false;
+    UniValue list(UniValue::VARR);
+    std::vector<uint256> tokens;
+    pgdb->GetTokens(tokens);
+    {
+        for (size_t i = 0; i < tokens.size(); i++) 
+            list.push_back(tokens[i].GetHex());
+    }
+    return list;
 }
+
 
 UniValue newtoken(const JSONRPCRequest& request)
 {
@@ -108,22 +150,6 @@ UniValue newtoken(const JSONRPCRequest& request)
     return false;
 }
 
-UniValue tokentransfer(const JSONRPCRequest& request)
-{
-    if (request.fHelp || request.params.size() != 1)
-        throw std::runtime_error(
-            "tokentransfer \"hash\" amount \"address\" [\"fromaddress\"]\n"
-            "\nCommand to create new token\n"
-
-            "\nArguments:\n"
-            "1. \"hash\"        (string) token hash id\n"
-            "2. amount          (integer) amount of transaction\n"
-            "3. \"address\"     (string) recipient address\n"
-            "4. \"fromaddress\" (string) sender address\n");
-
-
-    return false;
-}
 
 static const CRPCCommand commands[] =
     {
@@ -132,8 +158,9 @@ static const CRPCCommand commands[] =
         {"token", "istoken", &istoken, {"hash"}},
         {"token", "newtoken", &newtoken, {"name", "symbol", "supply"}},
         {"token", "tokeninfo", &tokeninfo, {"hash"}},
-        {"token", "tokenbalance", &tokenbalance, {"hash", "address"}},
-        {"token", "tokentransfer", &tokentransfer, {"hash", "amount", "address", "fromaddress"}},
+        {"token", "tokenidbyname", &tokenidbyname, {"name"}},
+        {"token", "tokenidbysymbol", &tokenidbysymbol, {"symbol"}},
+        {"token", "tokenlist", &tokenlist, {}},
 };
 
 void RegisterTokenRPCCommands(CRPCTable& t)
