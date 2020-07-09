@@ -536,6 +536,61 @@ UniValue sendtoaddress(const JSONRPCRequest& request)
     return wtx.GetHash().GetHex();
 }
 
+UniValue sendtokens(const JSONRPCRequest& request)
+{
+    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
+        return NullUniValue;
+    }
+
+    if (request.fHelp || request.params.size() != 3)
+        throw std::runtime_error(
+            "sendtokens \"address\" amount \"tokenid\"\n"
+            "\nSend an amount of tokens to a given address.\n"
+            + HelpRequiringPassphrase(pwallet) +
+            "\nArguments:\n"
+            "1. \"address\"            (string, required) The galaxycash address to send to.\n"
+            "2. \"amount\"             (numeric or string, required) The amount in " + CURRENCY_UNIT + " to send. eg 0.1\n"
+            "3. \"tokenid\"            (string, optional) token id\n"
+            "\nResult:\n"
+            "\"txid\"                  (string) The transaction id.\n");
+
+    ObserveSafeMode();
+
+    // Make sure the results are valid at least up to the most recent block
+    // the user could have gotten from another RPC command prior to now
+    pwallet->BlockUntilSyncedToCurrentChain();
+
+    LOCK2(cs_main, pwallet->cs_wallet);
+
+    CTxDestination dest = DecodeDestination(request.params[0].get_str());
+    if (!IsValidDestination(dest)) {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
+    }
+
+    // Amount
+    CAmount nAmount = AmountFromValue(request.params[1]);
+    if (nAmount <= 0)
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid amount for send");
+    if (nAmount < MIN_TXOUT_AMOUNT)
+        throw JSONRPCError(RPC_INSUFFICIENT_SEND_AMOUNT, "Send amount too small");
+
+    uint256 token = uint256S(request.params[2].get_str());
+    if (!pgdb->HaveToken(token))
+        throw JSONRPCError(RPC_TYPE_ERROR, "Bad tokenid");
+
+    // Wallet comments
+    CWalletTx wtx;
+
+
+    EnsureWalletIsUnlocked(pwallet);
+
+    CCoinControl coin_control;
+    SendMoney(pwallet, dest, nAmount, false, wtx, coin_control, token);
+
+    return wtx.GetHash().GetHex();
+}
+
 UniValue listaddressgroupings(const JSONRPCRequest& request)
 {
     CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
@@ -3408,13 +3463,13 @@ static const CRPCCommand commands[] =
     { "wallet",             "getaccountaddress",        &getaccountaddress,        {"account"} },
     { "wallet",             "getaccount",               &getaccount,               {"address"} },
     { "wallet",             "getaddressesbyaccount",    &getaddressesbyaccount,    {"account"} },
-    { "wallet",             "getbalance",               &getbalance,               {"account","minconf","include_watchonly"} },
+    { "wallet",             "getbalance",               &getbalance,               {"account","minconf","include_watchonly","tokenid"} },
     { "wallet",             "getnewaddress",            &getnewaddress,            {"account","address_type"} },
     { "wallet",             "getrawchangeaddress",      &getrawchangeaddress,      {"address_type"} },
-    { "wallet",             "getreceivedbyaccount",     &getreceivedbyaccount,     {"account","minconf"} },
-    { "wallet",             "getreceivedbyaddress",     &getreceivedbyaddress,     {"address","minconf"} },
+    { "wallet",             "getreceivedbyaccount",     &getreceivedbyaccount,     {"account","minconf","tokenid"} },
+    { "wallet",             "getreceivedbyaddress",     &getreceivedbyaddress,     {"address","minconf","tokenid"} },
     { "wallet",             "gettransaction",           &gettransaction,           {"txid","include_watchonly"} },
-    { "wallet",             "getunconfirmedbalance",    &getunconfirmedbalance,    {} },
+    { "wallet",             "getunconfirmedbalance",    &getunconfirmedbalance,    {"tokenid"} },
     { "wallet",             "getwalletinfo",            &getwalletinfo,            {} },
     { "wallet",             "importmulti",              &importmulti,              {"requests","options"} },
     { "wallet",             "importprivkey",            &importprivkey,            {"privkey","label","rescan"} },
@@ -3435,7 +3490,8 @@ static const CRPCCommand commands[] =
     { "wallet",             "move",                     &movecmd,                  {"fromaccount","toaccount","amount","minconf","comment"} },
     { "wallet",             "sendfrom",                 &sendfrom,                 {"fromaccount","toaddress","amount","minconf","comment","comment_to"} },
     { "wallet",             "sendmany",                 &sendmany,                 {"fromaccount","amounts","minconf","comment","subtractfeefrom","replaceable","conf_target"} },
-    { "wallet",             "sendtoaddress",            &sendtoaddress,            {"address","amount","comment","comment_to","subtractfeefromamount","replaceable","conf_target"} },
+    { "wallet",             "sendtoaddress",            &sendtoaddress,            {"address","amount","comment","comment_to","subtractfeefromamount","replaceable","conf_target", "tokenid"} },
+    { "wallet",             "sendtokens",               &sendtokens,               {"address","amount","tokenid"} },
     { "wallet",             "setaccount",               &setaccount,               {"address","account"} },
     { "wallet",             "signmessage",              &signmessage,              {"address","message"} },
     { "wallet",             "walletlock",               &walletlock,               {} },
