@@ -3301,7 +3301,7 @@ static void NewToken(CWallet * const pwallet, const CTxDestination &address, con
 
     std::vector<COutput> vCoins; CAmount total = 0;
     pwallet->AvailableCoins(uint256(), vCoins, true, nullptr, 1, g_token_collateral);
-    if (vCoins.size() < 1) {
+    if (vCoins.size() >= 1) {
         for (size_t i = 0; i < vCoins.size(); i++) {
             CInputCoin coin(vCoins[i].tx, vCoins[i].i);
             total += coin.txout.nValue;
@@ -3361,15 +3361,16 @@ UniValue newtoken(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_WALLET_ERROR, "Bad token supply");
     if (request.params[3].isNull()) 
         throw JSONRPCError(RPC_WALLET_ERROR, "Bad token deployment address");
+
     GalaxyCashToken token;
     token.name = request.params[0].get_str();
     token.symbol = request.params[1].get_str();
-    ParseMoney(request.params[2].get_str(), token.supply);
+    token.supply = request.params[2].get_int64() * COIN;
       
     CWalletTx wtx;
     NewToken(pwallet, destination, token, wtx);
 
-    return wtx.tx->GetHash().GetHex();
+    return wtx.tx != nullptr ? wtx.tx->GetHash().GetHex() : "Failed to create token";
 }
 
 static const CRPCCommand commands[] =
@@ -3427,7 +3428,7 @@ static const CRPCCommand commands[] =
     { "wallet",             "showkeypair",              &showkeypair,              {"hexprivkey"} },
     { "wallet",             "reservebalance",           &reservebalance,           {"reserve", "amount"} },
 
-    { "wallet",             "newtoken",                 &newtoken,                 {"name", "symbol", "supply"} },
+    { "wallet",             "newtoken",                 &newtoken,                 {"name", "symbol", "supply", "address"} },
 
     { "generating",         "generate",                 &generate,                 {"nblocks","maxtries"} },
 };

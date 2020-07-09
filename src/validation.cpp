@@ -531,7 +531,7 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
 {
     const CTransaction& tx = *ptx;
 
-    if (tx.nVersion == TX_ECO_VERSION && chainActive.Height() < chainparams.GetConsensus().ECOHeight)
+    if ((!tx.token.IsNull() || !tx.data.empty() || tx.nVersion == TX_ECO_VERSION) && chainActive.Height() < chainparams.GetConsensus().ECOHeight)
        return state.DoS(10, error("ECO Tx rejection, ECO not deployed."));
 
     const uint256 hash = tx.GetHash();

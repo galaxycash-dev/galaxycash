@@ -159,6 +159,9 @@ bool CheckTransaction(const CTransaction& tx, CValidationState& state, bool fChe
     if (tx.vout.empty())
         return state.DoS(10, false, REJECT_INVALID, "bad-txns-vout-empty");
 
+    if ((!tx.token.IsNull() || !tx.data.empty()) && tx.nVersion != TX_ECO_VERSION)
+        return state.DoS(100, false, REJECT_INVALID, "bad-txns-nonecotx-with-tokenorinfo"); 
+
     // Check for negative or overflow output values
     CAmount nValueOut = 0;
     for (const auto& txout : tx.vout) {
@@ -205,7 +208,7 @@ bool CheckTransaction(const CTransaction& tx, CValidationState& state, bool fChe
 
         for (const auto& txin : tx.vin) {
             uint256 hash;
-            if (pgdb->GetTxToken(txin.prevout.hash, hash))
+            if (!pgdb->GetTxToken(txin.prevout.hash, hash))
                 return state.DoS(100, false, REJECT_INVALID, "bad-txns-get-prevout-tokenid");
             if (!hash.IsNull())
                 return state.DoS(100, false, REJECT_INVALID, "bad-txns-tokenbase-collateral-notnative");
@@ -219,7 +222,7 @@ bool CheckTransaction(const CTransaction& tx, CValidationState& state, bool fChe
 
         for (const auto& txin : tx.vin) {
             uint256 hash;
-            if (pgdb->GetTxToken(txin.prevout.hash, hash))
+            if (!pgdb->GetTxToken(txin.prevout.hash, hash))
                 return state.DoS(100, false, REJECT_INVALID, "bad-txns-get-prevout-tokenid");
             if (hash != tx.token)
                 return state.DoS(100, false, REJECT_INVALID, "bad-txns-prevout-badtokenid");

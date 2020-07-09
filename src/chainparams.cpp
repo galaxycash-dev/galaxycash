@@ -105,7 +105,7 @@ public:
         consensus.BIP34Hash = uint256S("0x000002e5d366c89b16195d618462f5ad14f8bbfaf39a93f2593c2ceb67d94c16");
         consensus.powLimit = uint256S("0x00000fffff000000000000000000000000000000000000000000000000000000");
 
-        consensus.ECOHeight = 680000;
+        consensus.ECOHeight = 660000;
         consensus.SubsidyStopHeight = 600000;
 
 
@@ -222,16 +222,27 @@ public:
         consensus.nSubsidyHalvingInterval = 210000;
 
         consensus.BIP16Height = 0;
-        consensus.BIP34Height = 1;
-        consensus.BIP34Hash = uint256();
-        consensus.powLimit = uint256S("0x00000fffff000000000000000000000000000000000000000000000000000000");
+        consensus.BIP34Height = 293368;
+        consensus.BIP34Hash = uint256S("00000002c0b976c7a5c9878f1cec63fb4d88d68d614aedeaf8158c42d904795e");
+        consensus.powLimit =            uint256S("0000000fffffffffffffffffffffffffffffffffffffffffffffffffffffffff"); // ~arith_uint256(0) >> 28;
+
 
         consensus.ECOHeight = 0;
         consensus.SubsidyStopHeight = 0;
 
 
+        consensus.nMinerConfirmationWindow = 2016; // nPowTargetTimespan / nPowTargetSpacing
+
+        // The best chain should have at least this much work.
+        consensus.nMinimumChainWork = uint256S("0x00");
+
+        // By default assume that the signatures in ancestors of this block are valid.
+        consensus.defaultAssumeValid = uint256(); //1135275
+
+
         // POS
         consensus.stakeLimit = uint256S("0x00000fffff000000000000000000000000000000000000000000000000000000");
+
         consensus.nPOSFirstBlock = 0;
         consensus.nStakeMinConfirmations = 50;
 
@@ -252,11 +263,7 @@ public:
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = true;
 
-        // The best chain should have at least this much work.
-        consensus.nMinimumChainWork = uint256S("0x0000000000000000000000000000000000000000000000000000000000100001");
 
-        // By default assume that the signatures in ancestors of this block are valid.
-        consensus.defaultAssumeValid = uint256("0x0");
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.

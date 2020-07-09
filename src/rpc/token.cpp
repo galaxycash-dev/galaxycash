@@ -134,6 +134,19 @@ UniValue tokenlist(const JSONRPCRequest& request)
 }
 
 
+UniValue txtoken(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 1)
+        throw std::runtime_error(
+            "txtoken \"txid\"\n"
+            "\nCommand to get token id for tx\n");
+
+    uint256 token;
+    if (pgdb->GetTxToken(uint256S(request.params[0].get_str()), token)) {
+        return token.GetHex();
+    } else
+        return NullUniValue;
+}
 
 
 static const CRPCCommand commands[] =
@@ -144,6 +157,7 @@ static const CRPCCommand commands[] =
         {"token", "tokeninfo", &tokeninfo, {"hash"}},
         {"token", "tokenidbyname", &tokenidbyname, {"name"}},
         {"token", "tokenidbysymbol", &tokenidbysymbol, {"symbol"}},
+        {"token", "txtoken", &txtoken, {"txid"}},
         {"token", "tokenlist", &tokenlist, {}},
 };
 
