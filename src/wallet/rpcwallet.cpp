@@ -2106,6 +2106,10 @@ UniValue gettransaction(const JSONRPCRequest& request)
     CAmount nDebit = wtx.GetDebit(filter);
     CAmount nNet = nCredit - nDebit;
     CAmount nFee = (wtx.IsFromMe(filter) ? wtx.tx->GetValueOut() - nDebit : 0);
+    if (wtx.tx->IsToken() || wtx.tx->IsTokenBase()) {
+        nFee = 0;
+        nNet = wtx.tx->GetValueOut();
+    }
 
     entry.push_back(Pair("token", wtx.tx->token.GetHex()));
     
