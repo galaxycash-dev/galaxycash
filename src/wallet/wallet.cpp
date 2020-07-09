@@ -41,6 +41,7 @@
 #include <boost/foreach.hpp>
 #include <boost/thread.hpp>
 
+#include <galaxycash.h>
 
 std::vector<CWalletRef> vpwallets;
 unsigned int nTxConfirmTarget = DEFAULT_TX_CONFIRM_TARGET;
@@ -1450,12 +1451,14 @@ void CWalletTx::GetAmounts(std::list<COutputEntry>& listReceived,
     std::list<COutputEntry>& listSent,
     CAmount& nFee,
     std::string& strSentAccount,
-    const isminefilter& filter) const
+    const isminefilter& filter, const uint256 &token) const
 {
     nFee = 0;
     listReceived.clear();
     listSent.clear();
     strSentAccount = strFromAccount;
+
+    if (token != tx->token) return;
 
     // Compute fee:
     CAmount nDebit = GetDebit(filter);
@@ -1958,13 +1961,14 @@ void CWallet::ResendWalletTransactions(int64_t nBestBlockTime, CConnman* connman
  */
 
 
-CAmount CWallet::GetBalance() const
+CAmount CWallet::GetBalance(const uint256 &token) const
 {
     CAmount nTotal = 0;
     {
         LOCK2(cs_main, cs_wallet);
         for (const auto& entry : mapWallet) {
             const CWalletTx* pcoin = &entry.second;
+            if (pcoin->tx->token != token) continue;
             if (pcoin->IsTrusted())
                 nTotal += pcoin->GetAvailableCredit();
         }
@@ -1986,13 +1990,14 @@ CAmount CWallet::GetStake() const
     return nTotal;
 }
 
-CAmount CWallet::GetUnconfirmedBalance() const
+CAmount CWallet::GetUnconfirmedBalance(const uint256 &token) const
 {
     CAmount nTotal = 0;
     {
         LOCK2(cs_main, cs_wallet);
         for (const auto& entry : mapWallet) {
             const CWalletTx* pcoin = &entry.second;
+            if (pcoin->tx->token != token) continue;
             if (!pcoin->IsTrusted() && pcoin->GetDepthInMainChain() == 0 && pcoin->InMempool())
                 nTotal += pcoin->GetAvailableCredit();
         }
@@ -2061,13 +2066,14 @@ CAmount CWallet::GetImmatureWatchOnlyBalance() const
 // wallet, and then subtracts the values of TxIns spending from the wallet. This
 // also has fewer restrictions on which unconfirmed transactions are considered
 // trusted.
-CAmount CWallet::GetLegacyBalance(const isminefilter& filter, int minDepth, const std::string* account) const
+CAmount CWallet::GetLegacyBalance(const isminefilter& filter, int minDepth, const std::string* account, const uint256 &token) const
 {
     LOCK2(cs_main, cs_wallet);
 
     CAmount balance = 0;
     for (const auto& entry : mapWallet) {
         const CWalletTx& wtx = entry.second;
+        if (wtx.tx->token != token) continue;
         const int depth = wtx.GetDepthInMainChain();
         if (depth < 0 || !CheckFinalTx(*wtx.tx) || wtx.GetBlocksToMaturity() > 0) {
             continue;
@@ -2098,13 +2104,13 @@ CAmount CWallet::GetLegacyBalance(const isminefilter& filter, int minDepth, cons
     return balance;
 }
 
-CAmount CWallet::GetAvailableBalance(const CCoinControl* coinControl) const
+CAmount CWallet::GetAvailableBalance(const CCoinControl* coinControl, const uint256 &token) const
 {
     LOCK2(cs_main, cs_wallet);
 
     CAmount balance = 0;
     std::vector<COutput> vCoins;
-    AvailableCoins(vCoins, true, coinControl);
+    AvailableCoins(token, vCoins, true, coinControl);
     for (const COutput& out : vCoins) {
         if (out.fSpendable) {
             balance += out.tx->tx->vout[out.i].nValue;
@@ -2113,7 +2119,7 @@ CAmount CWallet::GetAvailableBalance(const CCoinControl* coinControl) const
     return balance;
 }
 
-void CWallet::AvailableCoins(std::vector<COutput>& vCoins, bool fOnlySafe, const CCoinControl* coinControl, const CAmount& nMinimumAmount, const CAmount& nMaximumAmount, const CAmount& nMinimumSumAmount, const uint64_t nMaximumCount, const int nMinDepth, const int nMaxDepth, uint32_t nSpendTime) const
+void CWallet::AvailableCoins(const uint256 &token, std::vector<COutput>& vCoins, bool fOnlySafe, const CCoinControl* coinControl, const CAmount& nMinimumAmount, const CAmount& nMaximumAmount, const CAmount& nMinimumSumAmount, const uint64_t nMaximumCount, const int nMinDepth, const int nMaxDepth, uint32_t nSpendTime) const
 {
     vCoins.clear();
 
@@ -2125,6 +2131,8 @@ void CWallet::AvailableCoins(std::vector<COutput>& vCoins, bool fOnlySafe, const
         for (const auto& entry : mapWallet) {
             const uint256& wtxid = entry.first;
             const CWalletTx* pcoin = &entry.second;
+
+            if (pcoin->tx->token != token) continue;
 
             if (!CheckFinalTx(*pcoin->tx))
                 continue;
@@ -2241,7 +2249,7 @@ std::map<CTxDestination, std::vector<COutput>> CWallet::ListCoins() const
     std::map<CTxDestination, std::vector<COutput>> result;
 
     std::vector<COutput> availableCoins;
-    AvailableCoins(availableCoins);
+    AvailableCoins(uint256(), availableCoins);
 
     LOCK2(cs_main, cs_wallet);
     for (auto& coin : availableCoins) {
@@ -2494,6 +2502,7 @@ void CWallet::AvailableCoinsForStaking(std::vector<COutput>& vCoins) const
         for (std::map<uint256, CWalletTx>::const_iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
         {
             const CWalletTx* pcoin = &(*it).second;
+            if (!pcoin->tx->token.IsNull()) continue;
 
             int nDepth = pcoin->GetDepthInMainChain();
             if (nDepth < 1)
@@ -2602,7 +2611,7 @@ bool CWallet::FundTransaction(CMutableTransaction& tx, CAmount& nFeeRet, int& nC
 
     CReserveKey reservekey(this);
     CWalletTx wtx;
-    if (!CreateTransaction(vecSend, wtx, reservekey, nFeeRet, nChangePosInOut, strFailReason, coinControl, false)) {
+    if (!CreateTransaction(tx.token, vecSend, wtx, reservekey, nFeeRet, nChangePosInOut, strFailReason, coinControl, false)) {
         return false;
     }
 
@@ -2650,7 +2659,7 @@ OutputType CWallet::TransactionChangeType(OutputType change_type, const std::vec
     return g_address_type;
 }
 
-bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet, int& nChangePosInOut, std::string& strFailReason, const CCoinControl& coin_control, bool sign)
+bool CWallet::CreateTransaction(const uint256 &token, const std::vector<CRecipient>& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet, int& nChangePosInOut, std::string& strFailReason, const CCoinControl& coin_control, bool sign)
 {
     CAmount nValue = 0;
     int nChangePosRequest = nChangePosInOut;
@@ -2674,6 +2683,7 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
     wtxNew.BindWallet(this);
     CMutableTransaction txNew;
     txNew.nTime = wtxNew.tx->nTime; // galaxycash: set time
+    txNew.token = token;
 
     CAmount nFeeNeeded;
     unsigned int nBytes;
@@ -2682,7 +2692,7 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
         LOCK2(cs_main, cs_wallet);
         {
             std::vector<COutput> vAvailableCoins;
-            AvailableCoins(vAvailableCoins, true, &coin_control, 1, MAX_MONEY, MAX_MONEY, 0, 0, 9999999, txNew.nTime);
+            AvailableCoins(token, vAvailableCoins, true, &coin_control, 1, MAX_MONEY, MAX_MONEY, 0, 0, 9999999, txNew.nTime);
 
             // Create change script that will be used if we need change
             // TODO: pass in scriptChange instead of reservekey so

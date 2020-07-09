@@ -286,10 +286,10 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-fee-not-enough");
         txfee = txfee_aux;
     }
-    if (tx.IsTokenBase()) {
-        const CAmount TokenCollateral = 1 * COIN;
-        if (nValueIn < TokenCollateral) return state.DoS(100, false, REJECT_INVALID, "bad-txns-tokencollateral-not-enough");
-    }
+
+    if (tx.IsTokenBase() && (nValueIn < g_token_collateral)) 
+        return state.DoS(100, false, REJECT_INVALID, "bad-txns-tokencollateral-not-enough");
+
 
     return true;
 }

@@ -115,5 +115,6 @@ bool GetTokenInfo(const CMutableTransaction &tx, GalaxyCashToken &token);
 bool GetTokenInfo(const CTransaction &tx, GalaxyCashToken &token);
 
 extern std::unique_ptr<GalaxyCashDB> pgdb;
+extern const int64_t g_token_collateral;
 
 #endif

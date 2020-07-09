@@ -41,6 +41,7 @@
 #include <memory>
 #include <mutex>
 
+#include <galaxycash.h>
 
 struct CUpdatedBlock {
     uint256 hash;
@@ -1005,6 +1006,8 @@ UniValue gettxout(const JSONRPCRequest& request)
     uint256 hash(uint256S(strHash));
     int n = request.params[1].get_int();
     COutPoint out(hash, n);
+    uint256 token;
+    pgdb->GetTxToken(hash, token);
     bool fMempool = true;
     if (!request.params[2].isNull())
         fMempool = request.params[2].get_bool();
@@ -1030,6 +1033,7 @@ UniValue gettxout(const JSONRPCRequest& request)
     } else {
         ret.push_back(Pair("confirmations", (int64_t)(pindex->nHeight - coin.nHeight + 1)));
     }
+    ret.push_back(Pair("token", token.GetHex()));
     ret.push_back(Pair("value", ValueFromAmount(coin.out.nValue)));
     UniValue o(UniValue::VOBJ);
     ScriptPubKeyToUniv(coin.out.scriptPubKey, o, true);
@@ -1078,6 +1082,9 @@ static UniValue SoftForkMajorityDesc(int version, CBlockIndex* pindex, const Con
         break;
     case 2:
         activated = pindex->nHeight >= consensusParams.BIP34Height;
+        break;
+    case 3:
+        activated = pindex->nHeight >= consensusParams.ECOHeight;
         break;
     }
     rv.push_back(Pair("status", activated));
@@ -1144,6 +1151,7 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
     UniValue softforks(UniValue::VARR);
     softforks.push_back(SoftForkDesc("bip16", 1, tip, consensusParams));
     softforks.push_back(SoftForkDesc("bip34", 2, tip, consensusParams));
+    softforks.push_back(SoftForkDesc("eco", 3, tip, consensusParams));
     obj.push_back(Pair("softforks", softforks));
 
     obj.push_back(Pair("warnings", GetWarnings("statusbar")));
@@ -1214,6 +1222,7 @@ UniValue getinfo(const JSONRPCRequest& request)
     UniValue softforks(UniValue::VARR);
     softforks.push_back(SoftForkDesc("bip16", 1, tip, consensusParams));
     softforks.push_back(SoftForkDesc("bip34", 2, tip, consensusParams));
+    softforks.push_back(SoftForkDesc("eco", 3, tip, consensusParams));
     obj.push_back(Pair("softforks", softforks));
 
     obj.push_back(Pair("warnings", GetWarnings("statusbar")));

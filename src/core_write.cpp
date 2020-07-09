@@ -15,6 +15,7 @@
 #include <util.h>
 #include <utilmoneystr.h>
 #include <utilstrencodings.h>
+#include <galaxycash.h>
 
 UniValue ValueFromAmount(const CAmount& amount)
 {
@@ -155,6 +156,21 @@ void ScriptPubKeyToUniv(const CScript& scriptPubKey,
     out.pushKV("addresses", a);
 }
 
+struct TokenInfo {
+    std::string name, symbol;
+    int64_t supply;
+
+    ADD_SERIALIZE_METHODS;
+
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action)
+    {
+        READWRITE(name);
+        READWRITE(symbol);
+        if (!(s.GetType() & SER_GETHASH)) READWRITE(supply);
+    }
+};
+
 void TxToUniv(const CTransaction& tx, const uint256& hashBlock, UniValue& entry, bool include_hex, int serialize_flags)
 {
     entry.pushKV("txid", tx.GetHash().GetHex());
@@ -163,6 +179,23 @@ void TxToUniv(const CTransaction& tx, const uint256& hashBlock, UniValue& entry,
     entry.pushKV("time", (int64_t)tx.nTime);
     entry.pushKV("size", (int)::GetSerializeSize(tx, SER_NETWORK, tx.nVersion));
     entry.pushKV("locktime", (int64_t)tx.nLockTime);
+    entry.pushKV("token", tx.token.GetHex());
+    
+    if (!tx.data.empty()) {
+        UniValue tokenInfo(UniValue::VOBJ);
+        tokenInfo.pushKV("id", tx.token.GetHex());
+        tokenInfo.pushKV("hex", HexStr(tx.data.begin(), tx.data.end()));
+        TokenInfo token;
+        CDataStream s(tx.data, SER_NETWORK, PROTOCOL_VERSION);
+        s >> token;
+        tokenInfo.pushKV("name", token.name);
+        tokenInfo.pushKV("symbol", token.symbol);
+        tokenInfo.pushKV("supply", token.supply);
+        entry.pushKV("tokenBase", true);
+        entry.pushKV("tokenInfo", tokenInfo);
+    } else {
+        entry.pushKV("tokenBase", false);
+    }
 
     UniValue vin(UniValue::VARR);
     for (unsigned int i = 0; i < tx.vin.size(); i++) {

@@ -235,16 +235,13 @@ public:
     void SetAlgorithm(const int32_t algo)
     {
         switch (algo) {
-        case CBlockHeader::ALGO_X11:
-            nVersion = CBlockHeader::X11_VERSION;
-        case CBlockHeader::ALGO_X13:
-            nVersion = CBlockHeader::X13_VERSION;
-        case CBlockHeader::ALGO_SHA256D:
-            nVersion = CBlockHeader::SHA256D_VERSION;
-        case CBlockHeader::ALGO_BLAKE2S:
-            nVersion = CBlockHeader::BLAKE2S_VERSION;
+        case CBlockHeader::ALGO_X11: nVersion = CBlockHeader::X11_VERSION; break;
+        case CBlockHeader::ALGO_X13: nVersion = CBlockHeader::X13_VERSION; break;
+        case CBlockHeader::ALGO_SHA256D: nVersion = CBlockHeader::SHA256D_VERSION; break;
+        case CBlockHeader::ALGO_BLAKE2S: nVersion = CBlockHeader::BLAKE2S_VERSION; break;
+        case CBlockHeader::ALGO_X12:
         default:
-            nVersion = CBlockHeader::X12_VERSION;
+            nVersion = CBlockHeader::X12_VERSION; break;
         }
     }
 

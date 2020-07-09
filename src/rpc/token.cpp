@@ -134,21 +134,6 @@ UniValue tokenlist(const JSONRPCRequest& request)
 }
 
 
-UniValue newtoken(const JSONRPCRequest& request)
-{
-    if (request.fHelp || request.params.size() != 1)
-        throw std::runtime_error(
-            "newtoken \"name\" \"ticker\" supply\n"
-            "\nCommand to create new token\n"
-
-            "\nArguments:\n"
-            "1. \"name\"        (string) name of token\n"
-            "2. \"symbol\"      (string) symbol of token\n"
-            "3. supply          (integer) supply of token\n");
-
-
-    return false;
-}
 
 
 static const CRPCCommand commands[] =
@@ -156,7 +141,6 @@ static const CRPCCommand commands[] =
         //  category              name                      actor (function)         okSafe argNames
         //  --------------------- ------------------------  -----------------------  ------ ----------
         {"token", "istoken", &istoken, {"hash"}},
-        {"token", "newtoken", &newtoken, {"name", "symbol", "supply"}},
         {"token", "tokeninfo", &tokeninfo, {"hash"}},
         {"token", "tokenidbyname", &tokenidbyname, {"name"}},
         {"token", "tokenidbysymbol", &tokenidbysymbol, {"symbol"}},

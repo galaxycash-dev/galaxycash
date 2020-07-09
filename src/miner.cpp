@@ -109,6 +109,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
 
     if (!pblocktemplate.get())
         return nullptr;
+    
     pblock = &pblocktemplate->block; // pointer for convenience
     pblock->SetAlgorithm(CBlockHeader::ALGO_X12);
     pblock->nTime = GetAdjustedTime();
@@ -487,7 +488,7 @@ void PoSMiner(CWallet* pwallet)
     unsigned int pos_timio;
     {
         std::vector<COutput> vCoins;
-        pwallet->AvailableCoins(vCoins, false);
+        pwallet->AvailableCoins(uint256(), vCoins, false);
         pos_timio = gArgs.GetArg("-staketimio", 500) + 30 * sqrt(vCoins.size());
         LogPrintf("Set proof-of-stake timeout: %ums for %u UTXOs\n", pos_timio, vCoins.size());
     }

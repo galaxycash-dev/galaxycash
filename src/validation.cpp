@@ -530,6 +530,10 @@ static bool CheckInputsFromMempoolAndCache(const CTransaction& tx, CValidationSt
 static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool& pool, CValidationState& state, const CTransactionRef& ptx, bool* pfMissingInputs, int64_t nAcceptTime, bool bypass_limits, std::vector<COutPoint>& coins_to_uncache)
 {
     const CTransaction& tx = *ptx;
+
+    if (tx.nVersion == TX_ECO_VERSION && chainActive.Height() < chainparams.GetConsensus().ECOHeight)
+       return state.DoS(10, error("ECO Tx rejection, ECO not deployed."));
+
     const uint256 hash = tx.GetHash();
     AssertLockHeld(cs_main);
     LOCK(pool.cs); // mempool "read lock" (held through GetMainSignals().TransactionAddedToMempool())

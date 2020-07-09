@@ -15,6 +15,7 @@
 #include <chain.h>
 #include <validation.h>
 
+const int64_t g_token_collateral = 1 * COIN;
 std::unique_ptr<GalaxyCashDB> pgdb;
 
 static std::string str_tolower(std::string s) {
@@ -195,6 +196,7 @@ void SetTokenInfo(CMutableTransaction &tx, const GalaxyCashToken &token) {
     CDataStream s(SER_NETWORK, PROTOCOL_VERSION);
     s << token;
     tx.data = std::vector<unsigned char>(s.uptr(), s.uptr() + s.size());
+    tx.token = token.GetHash();
 }
 
 bool GetTokenInfo(const CMutableTransaction &tx, GalaxyCashToken &token) {

@@ -143,6 +143,8 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "sendalert", 6, "cancelupto"},
 
     { "createdevblock", 0, "amount" },
+
+    { "newtoken", 2, "supply" },
 };
 
 class CRPCConvertTable

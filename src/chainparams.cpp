@@ -218,11 +218,36 @@ public:
     {
         strNetworkID = "test";
 
-        consensus.nLastPoW = 130000;
+        consensus.nLastPoW = 13000000;
         consensus.nSubsidyHalvingInterval = 210000;
+
+        consensus.BIP16Height = 0;
+        consensus.BIP34Height = 1;
+        consensus.BIP34Hash = uint256();
+        consensus.powLimit = uint256S("0x00000fffff000000000000000000000000000000000000000000000000000000");
 
         consensus.ECOHeight = 0;
         consensus.SubsidyStopHeight = 0;
+
+
+        // POS
+        consensus.stakeLimit = uint256S("0x00000fffff000000000000000000000000000000000000000000000000000000");
+        consensus.nPOSFirstBlock = 0;
+        consensus.nStakeMinConfirmations = 50;
+
+        consensus.nTargetSpacing = 3 * 60;         // 3 minutes
+        consensus.nTargetSpacing2 = 10 * 60;       // 10 minutes
+        consensus.nTargetTimespan = 6 * 60 * 60;   // 6 hours
+        consensus.nTargetTimespan2 = 24 * 60 * 60; // 24 hours
+        consensus.nStakeTargetSpacing = 2 * 60;
+        consensus.nStakeTargetTimespan = 6 * 60 * 60;                      // 6 hours
+        consensus.nStakeMinAge = 6 * 60 * 60;                              // minimum age for coin age
+        consensus.nStakeMaxAge = std::numeric_limits<int>::max();
+        consensus.nModifierInterval = 5 * 60; // Modifier interval: time to elapse before new modifier is computed
+        consensus.nCoinbaseMaturity = 11;
+
+        // Merge
+        consensus.nMergeFirstBlock =  consensus.nMergeLastBlock = 0;
 
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = true;
@@ -231,7 +256,7 @@ public:
         consensus.nMinimumChainWork = uint256S("0x0000000000000000000000000000000000000000000000000000000000100001");
 
         // By default assume that the signatures in ancestors of this block are valid.
-        consensus.defaultAssumeValid = uint256("0x7590d46bb45d01f3e02f079a516acf5c8b8234aa522098eb7bcb9a924b598611");
+        consensus.defaultAssumeValid = uint256("0x0");
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.
@@ -244,7 +269,7 @@ public:
         pchMessageStart[3] = 0x4e;
 
         nDefaultPort = 17604;
-        nPruneAfterHeight = 0;
+        nPruneAfterHeight = 100000;
 
         genesis = CreateGenesisBlock(1515086697, 1515086697, 1303736, UintToArith256(consensus.powLimit).GetCompact(), 9);
         consensus.hashGenesisBlock = genesis.GetHash();
@@ -254,7 +279,6 @@ public:
         // This is fine at runtime as we'll fall back to using them as a oneshot if they dont support the
         // service bits we want, but we should get them updated to support all service bits wanted by any
         // release ASAP to avoid it where possible.
-        vSeeds.clear();
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1, 38); // galaxycash: addresses begin with 'G'
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1, 99);
@@ -265,25 +289,21 @@ public:
         // human readable prefix to bench32 address
         bech32_hrp = "gc";
 
-        vFixedSeeds.clear();
+        vFixedSeeds = std::vector<SeedSpec6>(pnSeed6_main, pnSeed6_main + ARRAYLEN(pnSeed6_main));
 
-        fMiningRequiresPeers = true;
+        fMiningRequiresPeers = false;
         fDefaultConsistencyChecks = false;
-        fRequireStandard = true;
-        fMineBlocksOnDemand = false;
+        fRequireStandard = false;
+        fMineBlocksOnDemand = true;
 
 
         checkpointData = {
-            {{0, uint256S("0x00000076b947553b6888ca82875e04a4db21fd904aae46589e1d183b63327468")}}
-            };
-
+            {}};
 
         chainTxData = ChainTxData{
-            // Data as of block 9a4004b1327ae419b54cf9afa360b0aece7abe21a5a01860f3e131afde31c037 (height 466000).
-            1515086697, // * UNIX timestamp of last known number of transactions
-            1,     // * total number of transactions between genesis and that timestamp
-                        //   (the tx=... number in the SetBestChain debug.log lines)
-            0.0};
+            0,
+            0,
+            0};
     }
 };
 

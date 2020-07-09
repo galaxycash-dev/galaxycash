@@ -456,7 +456,7 @@ public:
         std::list<COutputEntry>& listSent,
         CAmount& nFee,
         std::string& strSentAccount,
-        const isminefilter& filter) const;
+        const isminefilter& filter, const uint256 &token = uint256()) const;
 
     bool IsFromMe(const isminefilter& filter) const
     {
@@ -850,7 +850,7 @@ public:
     /**
      * populate vCoins with vector of available COutputs.
      */
-    void AvailableCoins(std::vector<COutput>& vCoins, bool fOnlySafe = true, const CCoinControl* coinControl = nullptr, const CAmount& nMinimumAmount = 1, const CAmount& nMaximumAmount = MAX_MONEY, const CAmount& nMinimumSumAmount = MAX_MONEY, const uint64_t nMaximumCount = 0, const int nMinDepth = 0, const int nMaxDepth = 9999999, uint32_t nSpendTime = 0) const;
+    void AvailableCoins(const uint256 &token, std::vector<COutput>& vCoins, bool fOnlySafe = true, const CCoinControl* coinControl = nullptr, const CAmount& nMinimumAmount = 1, const CAmount& nMaximumAmount = MAX_MONEY, const CAmount& nMinimumSumAmount = MAX_MONEY, const uint64_t nMaximumCount = 0, const int nMinDepth = 0, const int nMaxDepth = 9999999, uint32_t nSpendTime = 0) const;
 
     /**
      * Return list of available coins and locked coins grouped by non-change output address.
@@ -966,15 +966,15 @@ public:
     void ResendWalletTransactions(int64_t nBestBlockTime, CConnman* connman) override;
     // ResendWalletTransactionsBefore may only be called if fBroadcastTransactions!
     std::vector<uint256> ResendWalletTransactionsBefore(int64_t nTime, CConnman* connman);
-    CAmount GetBalance() const;
+    CAmount GetBalance(const uint256 &token = uint256()) const;
     CAmount GetStake() const;
-    CAmount GetUnconfirmedBalance() const;
+    CAmount GetUnconfirmedBalance(const uint256 &token = uint256()) const;
     CAmount GetImmatureBalance() const;
     CAmount GetWatchOnlyBalance() const;
     CAmount GetUnconfirmedWatchOnlyBalance() const;
     CAmount GetImmatureWatchOnlyBalance() const;
-    CAmount GetLegacyBalance(const isminefilter& filter, int minDepth, const std::string* account) const;
-    CAmount GetAvailableBalance(const CCoinControl* coinControl = nullptr) const;
+    CAmount GetLegacyBalance(const isminefilter& filter, int minDepth, const std::string* account, const uint256 &token = uint256()) const;
+    CAmount GetAvailableBalance(const CCoinControl* coinControl = nullptr, const uint256 &token = uint256()) const;
 
     OutputType TransactionChangeType(OutputType change_type, const std::vector<CRecipient>& vecSend);
 
@@ -990,7 +990,7 @@ public:
      * selected by SelectCoins(); Also create the change output, when needed
      * @note passing nChangePosInOut as -1 will result in setting a random position
      */
-    bool CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet, int& nChangePosInOut, std::string& strFailReason, const CCoinControl& coin_control, bool sign = true);
+    bool CreateTransaction(const uint256 &token, const std::vector<CRecipient>& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet, int& nChangePosInOut, std::string& strFailReason, const CCoinControl& coin_control, bool sign = true);
     bool CreateCoinStake(const CKeyStore& keystore, int64_t nFees, int nHeight, unsigned int nBits, int64_t nSearchInterval, CMutableTransaction& txNew, CKey &key);
     bool CommitTransaction(CWalletTx& wtxNew, CReserveKey& reservekey, CConnman* connman, CValidationState& state);
 
