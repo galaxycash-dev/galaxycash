@@ -90,7 +90,23 @@ void EnsureWalletIsUnlocked(CWallet * const pwallet)
 void WalletTxToJSON(const CWalletTx& wtx, UniValue& entry)
 {
     int confirms = wtx.GetDepthInMainChain();
+    const CTransaction &tx = *wtx.tx;
     entry.push_back(Pair("token", wtx.tx->token.GetHex()));
+    if (!tx.data.empty()) {
+        UniValue tokenInfo(UniValue::VOBJ);
+        tokenInfo.pushKV("id", tx.token.GetHex());
+        tokenInfo.pushKV("hex", HexStr(tx.data.begin(), tx.data.end()));
+        GalaxyCashToken token;
+        CDataStream s(tx.data, SER_NETWORK, PROTOCOL_VERSION);
+        s >> token;
+        tokenInfo.pushKV("name", token.name);
+        tokenInfo.pushKV("symbol", token.symbol);
+        tokenInfo.pushKV("supply", token.supply);
+        entry.pushKV("tokenBase", true);
+        entry.pushKV("tokenInfo", tokenInfo);
+    } else {
+        entry.pushKV("tokenBase", false);
+    }
     entry.push_back(Pair("confirmations", confirms));
     if (wtx.IsCoinBase())
         entry.push_back(Pair("generated", true));
@@ -2092,6 +2108,7 @@ UniValue gettransaction(const JSONRPCRequest& request)
     CAmount nFee = (wtx.IsFromMe(filter) ? wtx.tx->GetValueOut() - nDebit : 0);
 
     entry.push_back(Pair("token", wtx.tx->token.GetHex()));
+    
     entry.push_back(Pair("amount", ValueFromAmount(nNet - nFee)));
     if (wtx.IsFromMe(filter))
         entry.push_back(Pair("fee", ValueFromAmount(nFee)));
